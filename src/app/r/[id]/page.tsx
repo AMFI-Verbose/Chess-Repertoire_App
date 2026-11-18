@@ -35,6 +35,7 @@ export default async function RepertoirePage({
 
   return (
     <RepertoireBuilder
+      repertoireId={repertoire.id}
       name={repertoire.name}
       side={repertoire.side === "black" ? "black" : "white"}
       initialNodes={initialNodes}

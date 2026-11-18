@@ -6,7 +6,13 @@ import Link from "next/link";
 import { Chessboard } from "react-chessboard";
 import { legalTargets, moveNumberOf, tryMove, turnOf } from "@/lib/chess";
 import type { NodeDTO } from "@/lib/types";
-import { addMove, deleteSubtree, saveComment, setMainLine } from "@/app/actions";
+import {
+  addMove,
+  deleteSubtree,
+  importPgn,
+  saveComment,
+  setMainLine,
+} from "@/app/actions";
 
 type Pending = {
   san: string;
@@ -17,10 +23,12 @@ type Pending = {
 };
 
 export default function RepertoireBuilder({
+  repertoireId,
   name,
   side,
   initialNodes,
 }: {
+  repertoireId: string;
   name: string;
   side: "white" | "black";
   initialNodes: NodeDTO[];
@@ -212,6 +220,12 @@ export default function RepertoireBuilder({
       prev.map((n) => (n.id === nodeId ? { ...n, comment: text || null } : n)),
     );
     await saveComment(nodeId, text);
+  }
+
+  /** PGN import returns the nodes it actually created — just append them. */
+  function handleImported(created: NodeDTO[]) {
+    if (created.length === 0) return;
+    setNodes((prev) => [...prev, ...created]);
   }
 
   function jumpToMainlineEnd(startId: string) {
@@ -410,6 +424,13 @@ export default function RepertoireBuilder({
             />
           </Panel>
 
+          <Panel title="Import PGN">
+            <ImportPanel
+              repertoireId={repertoireId}
+              onImported={handleImported}
+            />
+          </Panel>
+
           <Panel title="Danger zone">
             {current.ply === 0 ? (
               <p className="text-xs text-[var(--muted)]">
@@ -496,6 +517,72 @@ function CommentBox({
       >
         {dirty ? "Save note" : "Saved"}
       </button>
+    </div>
+  );
+}
+
+function ImportPanel({
+  repertoireId,
+  onImported,
+}: {
+  repertoireId: string;
+  onImported: (created: NodeDTO[]) => void;
+}) {
+  const [pgn, setPgn] = useState("");
+  const [status, setStatus] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  async function runImport() {
+    if (pgn.trim().length === 0 || busy) return;
+    setBusy(true);
+    setStatus(null);
+    try {
+      const result = await importPgn({ repertoireId, pgn });
+      onImported(result.createdNodes);
+
+      const parts = [
+        `${result.gamesImported} game${result.gamesImported === 1 ? "" : "s"} read`,
+        `${result.movesWalked} moves checked`,
+        `${result.createdNodes.length} new position${
+          result.createdNodes.length === 1 ? "" : "s"
+        } added`,
+      ];
+      if (result.gamesFailed > 0) parts.push(`${result.gamesFailed} unreadable`);
+      setStatus(parts.join(" · "));
+
+      if (result.createdNodes.length > 0) setPgn("");
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : "Import failed");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="flex flex-col gap-2">
+      <textarea
+        value={pgn}
+        onChange={(event) => setPgn(event.target.value)}
+        rows={4}
+        placeholder={'[Event "Italian Game"]\n\n1. e4 e5 2. Nf3 Nc6 3. Bc4'}
+        className="w-full resize-y rounded-lg border border-[var(--line)] bg-[var(--bg)] px-3 py-2 font-mono text-xs outline-none transition focus:border-[var(--accent)]"
+      />
+      <div className="flex flex-wrap items-center gap-2">
+        <button
+          onClick={runImport}
+          disabled={busy || pgn.trim().length === 0}
+          className="rounded-lg bg-[var(--accent)] px-3 py-1.5 text-xs font-medium text-[#0b0e14] transition hover:brightness-110 disabled:opacity-40"
+        >
+          {busy ? "Importing…" : "Import"}
+        </button>
+        {status && (
+          <span className="text-xs text-[var(--muted)]">{status}</span>
+        )}
+      </div>
+      <p className="text-[11px] leading-relaxed text-[var(--muted)]">
+        Paste one or more PGN games. Moves already in your tree are matched
+        rather than duplicated, so importing the same game twice adds nothing.
+      </p>
     </div>
   );
 }
