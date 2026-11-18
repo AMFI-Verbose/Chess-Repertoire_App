@@ -8,7 +8,12 @@
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { prisma } from "@/lib/prisma";
-import { START_FEN } from "@/lib/chess";
+import {
+  START_FEN,
+  parsePgnGame,
+  splitPgnGames,
+  type PgnMove,
+} from "@/lib/chess";
 import type { NodeDTO } from "@/lib/types";
 
 type DbNode = {
@@ -145,4 +150,104 @@ export async function saveComment(nodeId: string, comment: string): Promise<void
   });
 
   revalidatePath(`/r/${node.repertoireId}`);
+}
+
+/**
+ * Merge one or more pasted PGN games into the tree.
+ *
+ * The important property: this is an *idempotent merge*, not an insert.
+ * Every move is matched against the children that already exist, so pasting
+ * the same game twice creates nothing the second time, and a game that shares
+ * the first 8 moves with an existing line only adds the moves after they diverge.
+ *
+ * All writes happen inside one transaction: either the whole paste lands or
+ * nothing does, so a bad PGN halfway through can't leave a half-built line.
+ */
+export async function importPgn(input: {
+  repertoireId: string;
+  pgn: string;
+}): Promise<{
+  createdNodes: NodeDTO[];
+  gamesImported: number;
+  gamesFailed: number;
+  movesWalked: number;
+}> {
+  const root = await prisma.node.findFirst({
+    where: { repertoireId: input.repertoireId, ply: 0 },
+  });
+  if (!root) throw new Error("Repertoire not found");
+
+  const chunks = splitPgnGames(input.pgn);
+  const lines: PgnMove[][] = [];
+  let gamesFailed = 0;
+
+  for (const chunk of chunks) {
+    const moves = parsePgnGame(chunk);
+    if (moves && moves.length > 0) lines.push(moves);
+    else gamesFailed += 1;
+  }
+
+  const movesWalked = lines.reduce((total, line) => total + line.length, 0);
+
+  const createdNodes = await prisma.$transaction(async (tx) => {
+    const existing = await tx.node.findMany({
+      where: { repertoireId: input.repertoireId },
+    });
+
+    // In-memory index of what already exists: "<parentId>|<uci>" -> node.
+    // This is what makes the merge O(moves) instead of a query per move.
+    const byKey = new Map<string, { id: string; ply: number }>();
+    const childCount = new Map<string, number>();
+
+    for (const node of existing) {
+      if (!node.parentId) continue; // the root itself has no move
+      byKey.set(`${node.parentId}|${node.uci}`, node);
+      childCount.set(node.parentId, (childCount.get(node.parentId) ?? 0) + 1);
+    }
+
+    const created: NodeDTO[] = [];
+
+    for (const line of lines) {
+      let cursorId = root.id;
+      let cursorPly = 0;
+
+      for (const move of line) {
+        const key = `${cursorId}|${move.uci}`;
+        let node = byKey.get(key);
+
+        if (!node) {
+          const siblings = childCount.get(cursorId) ?? 0;
+          const row = await tx.node.create({
+            data: {
+              repertoireId: input.repertoireId,
+              parentId: cursorId,
+              san: move.san,
+              uci: move.uci,
+              fen: move.fen,
+              ply: cursorPly + 1,
+              isMain: siblings === 0, // first child of a position = main line
+            },
+          });
+          node = { id: row.id, ply: row.ply };
+          byKey.set(key, node);
+          childCount.set(cursorId, siblings + 1);
+          created.push(toDTO(row));
+        }
+
+        cursorId = node.id;
+        cursorPly = node.ply;
+      }
+    }
+
+    return created;
+  });
+
+  revalidatePath(`/r/${input.repertoireId}`);
+
+  return {
+    createdNodes,
+    gamesImported: lines.length,
+    gamesFailed,
+    movesWalked,
+  };
 }

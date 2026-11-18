@@ -123,6 +123,7 @@ fixes it.
 - [x] Per-position notes
 - [x] Delete a branch (with confirmation)
 - [x] Persistence in SQLite
+- [x] PGN import — merges into the tree instead of duplicating
 
 ### Milestone 3 — Spaced repetition (the reason this app exists)
 The `Review` table is already in the schema, unused. Wire it up:
@@ -132,10 +133,11 @@ The `Review` table is already in the schema, unused. Wire it up:
 4. Save it back to `Review`; update `dueAt`.
 5. Dashboard shows a "due today" count per repertoire.
 
-### Milestone 4 — PGN import
-- Paste a PGN, parse it with `chess.js`, walk it move by move through
-  `addMove`, merging into the existing tree.
-- Export your repertoire as PGN too.
+### Milestone 4 — PGN export & nested variations
+- Export your repertoire as PGN: walk the main line, emit side lines in
+  parentheses.
+- Import nested variations (`1. e4 (1. d4 d5)`) — `loadPgn` only exposes the
+  main line through `history()`, so this needs a real PGN tree parser.
 
 ### Milestone 5 — Real tree view
 - A recursive sidebar component that draws the whole tree, collapsing

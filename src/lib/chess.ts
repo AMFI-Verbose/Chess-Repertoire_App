@@ -50,3 +50,43 @@ export function moveNumberOf(ply: number): string {
   const moveNo = Math.floor((ply + 1) / 2);
   return ply % 2 === 1 ? `${moveNo}.` : `${moveNo}...`;
 }
+
+export type PgnMove = {
+  san: string;
+  uci: string;
+  fen: string; // position AFTER this move
+};
+
+/**
+ * A PGN file can hold several games. In the standard format each game is
+ * `[tag blocks]` + blank line + `move text`, and the NEXT game starts with a
+ * new `[` tag block after a blank line. So we split on "blank line followed by
+ * a tag block" — which leaves a single game's own blank line untouched.
+ */
+export function splitPgnGames(pgn: string): string[] {
+  const normalized = pgn.replace(/\r\n?/g, "\n").trim();
+  if (normalized.length === 0) return [];
+  return normalized
+    .split(/\n\s*\n(?=\s*\[)/)
+    .map((chunk) => chunk.trim())
+    .filter((chunk) => chunk.length > 0);
+}
+
+/**
+ * Parse one game's text into an ordered list of moves.
+ * Returns null when chess.js rejects the PGN (illegal move, bad notation) —
+ * a malformed paste must not crash the request.
+ */
+export function parsePgnGame(chunk: string): PgnMove[] | null {
+  const game = new Chess();
+  try {
+    game.loadPgn(chunk);
+  } catch {
+    return null;
+  }
+  return game.history({ verbose: true }).map((move) => ({
+    san: move.san,
+    uci: `${move.from}${move.to}${move.promotion ?? ""}`,
+    fen: move.after,
+  }));
+}
