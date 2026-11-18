@@ -40,11 +40,13 @@ export default function RepertoireBuilder({
   name,
   side,
   initialNodes,
+  openingIndex,
 }: {
   repertoireId: string;
   name: string;
   side: "white" | "black";
   initialNodes: NodeDTO[];
+  openingIndex: Record<string, { eco: string; name: string; ply: number }>;
 }) {
   // The move tree lives in React state, seeded from the server. Each mutation is
   // applied locally first (optimistic UI) and then persisted by a server action.
@@ -124,10 +126,20 @@ export default function RepertoireBuilder({
     };
   }, [pathSignature, repertoireId]);
 
-  const detectedOpening = description.opening;
-  const transpositions = description.transpositions;
+  // Instant label: the page preloaded the opening name of every stored
+  // position, so walking the tree never waits on the network. The server
+  // answer only has to fill in a move added during this session.
+  const instantOpening = useMemo(() => {
+    for (let index = path.length - 1; index >= 0; index -= 1) {
+      const key = normalizedFen(path[index].fen);
+      const hit = openingIndex[key];
+      if (hit) return hit;
+    }
+    return null;
+  }, [path, openingIndex]);
 
-  const targets = useMemo(
+  const detectedOpening = instantOpening ?? description.opening;
+  const transpositions = description.transpositions;  const targets = useMemo(
     () => (selected ? legalTargets(current?.fen ?? "", selected) : []),
     [selected, current?.fen],
   );
