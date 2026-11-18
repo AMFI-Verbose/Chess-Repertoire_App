@@ -8,6 +8,7 @@
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { prisma } from "@/lib/prisma";
+import type { Prisma } from "@prisma/client";
 import {
   START_FEN,
   normalizedFen,
@@ -390,4 +391,70 @@ export async function describePosition(input: {
   });
 
   return { opening, transpositions };
+}
+
+export type OpeningSummary = {
+  eco: string;
+  name: string;
+  movesUci: string;
+  ply: number;
+  epd: string;
+};
+
+/**
+ * Search the ECO table for the openings browser.
+ *
+ * Three input modes, mixed freely:
+ *   text        — substring match on the name, or a partial ECO code ("B9")
+ *   eco         — restrict to one volume (A/B/C/D/E)
+ *   movePrefix  — UCI move tokens; filters to lines that *start* with them
+ *
+ * The last one is what makes the search feel clever: typing "1.e4 c5" on the
+ * client is parsed into "e2e4 c7c5", and this returns the whole Sicilian.
+ */
+export async function searchOpenings(input: {
+  text?: string;
+  eco?: string;
+  movePrefix?: string;
+  limit?: number;
+}): Promise<OpeningSummary[]> {
+  const limit = Math.min(Math.max(input.limit ?? 60, 1), 200);
+  const filters: Prisma.OpeningWhereInput[] = [];
+
+  if (input.eco && /^[a-eA-E]$/.test(input.eco)) {
+    filters.push({ eco: { startsWith: input.eco.toUpperCase() } });
+  }
+
+  const text = input.text?.trim();
+  if (text) {
+    const upper = text.toUpperCase();
+    filters.push({
+      OR: [{ name: { contains: text } }, { eco: { contains: upper } }],
+    });
+  }
+
+  const prefix = input.movePrefix?.trim();
+  if (prefix) {
+    filters.push({ movesUci: { startsWith: prefix } });
+  }
+
+  const rows = await prisma.opening.findMany({
+    where: filters.length > 0 ? { AND: filters } : undefined,
+    // A line search reads like a table of contents, so the shortest lines
+    // (the family names) come first and the deep variations follow.
+    orderBy: prefix ? [{ ply: "asc" }, { name: "asc" }] : [{ name: "asc" }],
+    take: limit + 40,
+    select: { eco: true, name: true, movesUci: true, ply: true, epd: true },
+  });
+
+  // `startsWith` is a raw string comparison, so "e2e4" would also match a line
+  // whose first token is "e2e4c7c5". Enforce the token boundary here.
+  const bounded = prefix
+    ? rows.filter(
+        (row) =>
+          row.movesUci === prefix || row.movesUci.startsWith(`${prefix} `),
+      )
+    : rows;
+
+  return bounded.slice(0, limit);
 }

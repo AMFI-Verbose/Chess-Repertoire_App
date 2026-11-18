@@ -204,6 +204,22 @@ defined in one place: `LABEL_STYLES` and `classifyMove` in `src/lib/classify.ts`
 - [x] Play against Stockfish 19 (WASM, no server engine)
 - [x] Review mode: every move graded Brilliant / Great / Best / … / Blunder
 - [x] Build / Play / Review mode switcher
+- [x] Opening library with search by name, ECO code or move sequence
+
+### How the library search works
+One server action, three filters that can be combined:
+
+| You type | What happens |
+|---|---|
+| `Najdorf` | substring match on `name` |
+| `B90` or `B9` | matches the `eco` column (volume filter buttons do the same) |
+| `1.e4 c5` | parsed with chess.js into UCI (`e2e4 c7c5`), then `movesUci` prefix match |
+
+The move parsing is the interesting bit: it parses tokens until one fails, so a
+half-typed `1. e4 e5 2. Nf` still returns every line beginning with
+`e2e4 e7e5 g1f3` instead of nothing. Matching is a raw string prefix in SQL, so
+`searchOpenings` re-checks the token boundary afterwards — otherwise `e2e4`
+would match a line whose first token was `e2e4c7c5`.
 
 ### Structure of the three modes
 | Mode | Route | What it does |
@@ -211,6 +227,7 @@ defined in one place: `LABEL_STYLES` and `classifyMove` in `src/lib/classify.ts`
 | Build | `/r/[id]` | author the tree, auto-detect openings/transpositions |
 | Play | `/r/[id]/play` | human vs Stockfish, eval bar, take-back, skill slider |
 | Review | `/r/[id]/review` | grade the main line, replay with annotations + effects |
+| Library | `/openings` | search all 3,865 named lines, preview each on a board |
 
 ### Milestone 3 — Spaced repetition (the reason this app exists)
 The `Review` table is already in the schema, unused. Wire it up:
@@ -243,6 +260,7 @@ The `Review` table is already in the schema, unused. Wire it up:
 |---|---|
 | Change the data model | edit `prisma/schema.prisma`, then `npx prisma migrate dev --name your_change` |
 | Look at the raw data | `npm run db:studio` |
+| Look up an opening | `/openings` — search by name, ECO code or moves |
 | Refresh the ECO opening table | `npm run db:openings` (needs network, ~3,900 rows) |
 | Add a backend operation | export an async function from `src/app/actions.ts` |
 | Change interaction logic | `src/components/RepertoireBuilder.tsx` |

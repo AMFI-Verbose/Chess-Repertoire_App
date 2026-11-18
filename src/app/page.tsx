@@ -6,10 +6,13 @@ import { createRepertoire } from "./actions";
 export const dynamic = "force-dynamic";
 
 export default async function DashboardPage() {
-  const repertoires = await prisma.repertoire.findMany({
-    orderBy: { updatedAt: "desc" },
-    include: { _count: { select: { nodes: true } } },
-  });
+  const [repertoires, openingCount] = await Promise.all([
+    prisma.repertoire.findMany({
+      orderBy: { updatedAt: "desc" },
+      include: { _count: { select: { nodes: true } } },
+    }),
+    prisma.opening.count(),
+  ]);
 
   return (
     <main className="mx-auto max-w-5xl px-6 py-14">
@@ -26,6 +29,25 @@ export default async function DashboardPage() {
           comes next.
         </p>
       </header>
+
+      <Link
+        href="/openings"
+        className="group mb-10 flex items-center gap-4 rounded-xl border border-[var(--line)] bg-[var(--panel)] px-5 py-4 transition hover:border-[var(--accent)]"
+      >
+        <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-[var(--line)] bg-[#f0d9b5] text-lg text-[#b58863]">
+          ♜
+        </span>
+        <span className="min-w-0 flex-1">
+          <span className="block font-medium">Browse the opening library</span>
+          <span className="mt-0.5 block text-xs text-[var(--muted)]">
+            {openingCount.toLocaleString()} named lines — search by name, ECO code, or
+            moves
+          </span>
+        </span>
+        <span className="shrink-0 text-xs text-[var(--muted)] transition group-hover:text-[var(--accent)]">
+          Search →
+        </span>
+      </Link>
 
       <div className="grid gap-8 lg:grid-cols-[minmax(0,1fr)_340px]">
         <section>
