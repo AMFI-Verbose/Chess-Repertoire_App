@@ -13,20 +13,14 @@ export default async function RepertoirePage({
 }) {
   const { id } = await params;
 
-  // One parallel round trip: the repertoire itself, plus the small opening
-  // reference table that drives auto-detection in the client.
-  const [repertoire, openings] = await Promise.all([
-    prisma.repertoire.findUnique({
-      where: { id },
-      include: {
-        nodes: { orderBy: [{ ply: "asc" }, { createdAt: "asc" }] },
-      },
-    }),
-    prisma.opening.findMany({
-      select: { eco: true, name: true, movesUci: true, ply: true },
-      orderBy: { ply: "asc" },
-    }),
-  ]);
+  // The full ECO table is ~3,900 rows, so it stays on the server. The client
+  // asks for a single position description per navigation instead.
+  const repertoire = await prisma.repertoire.findUnique({
+    where: { id },
+    include: {
+      nodes: { orderBy: [{ ply: "asc" }, { createdAt: "asc" }] },
+    },
+  });
 
   if (!repertoire) notFound();
 
@@ -47,7 +41,6 @@ export default async function RepertoirePage({
       name={repertoire.name}
       side={repertoire.side === "black" ? "black" : "white"}
       initialNodes={initialNodes}
-      openings={openings}
     />
   );
 }

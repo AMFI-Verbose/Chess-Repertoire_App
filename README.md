@@ -130,10 +130,58 @@ get a key that is identical for the **same position reached by different move
 orders** — a transposition. `Node.normFen` stores that key, `@@index([normFen])`
 makes "who else has this position?" a single indexed lookup instead of a scan.
 
-Opening detection uses the other direction: the `Opening` table stores each
-opening as a UCI move sequence, and the app keeps the **longest** entry that
-prefixes your current line. So `1.e4 c5 2.Nf3 d6` gives B50, and adding `...a6`
-moves you to B90 — no extra queries, because the whole table is 68 rows.
+Opening detection now uses the same key from the other side. The `Opening` table
+is the **whole** Lichess ECO dataset — 3,865 lines, each stored with the
+normalized FEN of its final position in an indexed `epd` column. Detection is
+therefore an *exact* lookup, not a prefix scan:
+
+1. The client sends every position key along the current line (`normFens[]`).
+2. The server finds the deepest one that exists in the table.
+3. That row's ECO code + name come back, so an unnamed move still reports the
+   opening it belongs to — exactly how Lichess labels a position.
+
+The table stays on the server (3,865 rows would be ~300 KB of JSON on every page
+load); the client asks `describePosition` once per navigation, and gets the
+transposition list in the same round trip.
+
+### f) How a move gets graded
+
+The engine returns a score in **centipawns** (1/100 of a pawn), always from the
+point of view of the side whose turn it is. That one convention drives the whole
+grader:
+
+```
+position after move 1      →  score = +0.35   (White's turn: White is better)
+position after move 1...   →  score = -0.35   (Black's turn: Black is worse)
+```
+
+So to judge White's move you need `score_before` (White's view) and
+`score_after`, then flip the sign: `played = -score_after`. The difference
+`best - played` is the **centipawn loss**, and the tiers are thresholds on it:
+
+| Loss | Label |
+|---|---|
+| 0 | Best |
+| ≤ 20 | Excellent |
+| ≤ 60 | Good |
+| ≤ 120 | Inaccuracy |
+| ≤ 250 | Mistake |
+| > 250 | Blunder |
+
+Two labels need more than a loss:
+
+- **Great** — you played the best move *and* the second-best move was much worse
+  (≥ 1.5 pawns). That is why the analyser asks for `MultiPV 2`: it wants the
+  runner-up score, not just the winner.
+- **Brilliant** — you played the best move *and* gave material away. The
+  sacrifice test compares the material count on the board before and after
+  (`materialFor()`), and requires the position to still be sound.
+
+**Book** is not an engine verdict at all — it means the position exists in the
+ECO table, so the server answers it with one indexed query instead of a search.
+
+Each label has a colour, a glyph (`!!`, `?`, `??`, …), a sound and a flash, all
+defined in one place: `LABEL_STYLES` and `classifyMove` in `src/lib/classify.ts`.
 
 ---
 
@@ -149,9 +197,20 @@ moves you to B90 — no extra queries, because the whole table is 68 rows.
 - [x] Delete a branch (with confirmation)
 - [x] Persistence in SQLite
 - [x] PGN import — merges into the tree instead of duplicating
-- [x] Auto-detected opening name (ECO) as you walk a line
+- [x] Auto-detected opening name (ECO) from the full Lichess database
 - [x] Transposition detection across repertoires
 - [x] Sound effects (Web Audio, no asset files) + last-move / check visuals
+- [x] Keyboard navigation: `←` / `→` walk the line
+- [x] Play against Stockfish 19 (WASM, no server engine)
+- [x] Review mode: every move graded Brilliant / Great / Best / … / Blunder
+- [x] Build / Play / Review mode switcher
+
+### Structure of the three modes
+| Mode | Route | What it does |
+|---|---|---|
+| Build | `/r/[id]` | author the tree, auto-detect openings/transpositions |
+| Play | `/r/[id]/play` | human vs Stockfish, eval bar, take-back, skill slider |
+| Review | `/r/[id]/review` | grade the main line, replay with annotations + effects |
 
 ### Milestone 3 — Spaced repetition (the reason this app exists)
 The `Review` table is already in the schema, unused. Wire it up:
@@ -173,8 +232,7 @@ The `Review` table is already in the schema, unused. Wire it up:
 
 ### Milestone 6 — Polish
 - Promotion picker (currently auto-queens)
-- Keyboard navigation (`←`/`→`)
-- Search positions by FEN prefix
+- Review a game you paste in, not just the stored main line
 - Multiple users / auth (add a `User` model and scope every query by it)
 
 ---
@@ -185,9 +243,12 @@ The `Review` table is already in the schema, unused. Wire it up:
 |---|---|
 | Change the data model | edit `prisma/schema.prisma`, then `npx prisma migrate dev --name your_change` |
 | Look at the raw data | `npm run db:studio` |
+| Refresh the ECO opening table | `npm run db:openings` (needs network, ~3,900 rows) |
 | Add a backend operation | export an async function from `src/app/actions.ts` |
 | Change interaction logic | `src/components/RepertoireBuilder.tsx` |
-| Change colours | the `:root` block in `src/app/globals.css` |
+| Change engine strength / timing | `skillSettings()` in `src/components/PlayVsEngine.tsx` |
+| Move a grade up or down a tier | the thresholds in `classifyMove` (`src/lib/classify.ts`) |
+| Change colours | the `:root` block in `src/app/globals.css`; board colours in `src/lib/boardTheme.ts` |
 | Verify nothing is broken | `npm run build` |
 
 ---
@@ -202,3 +263,17 @@ The `Review` table is already in the schema, unused. Wire it up:
   explicit `string | null` annotation or the compiler gave up on the loop.
 - **CSS background overlays.** Highlight squares with `backgroundImage`, not
   `background` — the latter resets the square's colour to transparent.
+- **react-chessboard v5 puts `squareStyles` on an *inner* div.** The square's own
+  DOM node (`[data-square="e4"]`) keeps only its base colour, so inspecting that
+  element looks like "the highlight didn't work". Look at its children instead.
+- **The Lichess CSV has three columns, not four.** `eco / name / pgn` — there is
+  no `uci` or `epd` column, so the seed script replays each PGN with chess.js and
+  derives both. 5 of 3,870 rows fail to parse and are skipped.
+- **Stockfish must be the `-single` build for browsers.** The multi-threaded
+  build needs `SharedArrayBuffer`, which needs COOP/COEP response headers. The
+  `lite-single` pair (`28 KB` js + `1.8 MB` wasm) needs neither.
+- **Engine calls must be serialized.** One Worker is one state machine; two
+  `go` commands in flight interleave their `info` streams. `Engine.search()`
+  chains requests through a queue.
+- **One search per position, not two.** The score after a move *is* the score
+  before the next one, so a 30-move game needs 31 searches, not 60.

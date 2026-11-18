@@ -60,17 +60,21 @@ model Node {
   @@index([normFen])
 }
 
-/// Reference data: recognised opening names keyed by exact move sequence.
-/// Detection = find the longest entry whose `movesUci` prefixes your current line.
-/// This is a curated subset of ECO, not the whole 500-code encyclopaedia —
-/// extend it by adding rows, nothing else in the app needs to change.
+/// Reference data: recognised opening names, sourced from the free
+/// lichess-org/chess-openings dataset (CC0). This is the *whole* ECO table
+/// (~3,900 lines), not a hand-picked subset.
+///
+/// Detection is an exact lookup on `epd` — the normalized position key of the
+/// line's final position — which is how Lichess itself names a position.
 model Opening {
   id       String @id @default(cuid())
   eco      String // "B90"
-  name     String // "Sicilian Defence, Najdorf Variation"
+  name     String // "Sicilian Defense: Najdorf Variation"
   movesUci String // "e2e4 c7c5 g1f3 d7d6 d2d4 cxd4 f3d4 g8f6 b1c3 a7a6"
+  epd      String @default("") // normalized FEN of the final position
   ply      Int // how many half-moves this entry covers
 
+  @@index([epd])
   @@index([ply])
 }
 

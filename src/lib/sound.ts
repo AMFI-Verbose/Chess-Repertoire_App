@@ -9,7 +9,14 @@ export type SoundName =
   | "error"
   | "success"
   | "navigate"
-  | "delete";
+  | "delete"
+  // Move-classification cues (review mode only)
+  | "best"
+  | "brilliant"
+  | "great"
+  | "inaccuracy"
+  | "mistake"
+  | "blunder";
 
 const STORAGE_KEY = "repertoire.muted";
 
@@ -118,6 +125,44 @@ export function play(name: SoundName): void {
       break;
     case "delete":
       tone({ freq: 320, duration: 0.16, type: "triangle", gain: 0.08, sweepTo: 90 });
+      break;
+
+    // --- classification cues ------------------------------------------------
+    // Each one has a distinct *shape*, not just a distinct pitch, so you can
+    // identify the verdict with your ears while looking at the board.
+    case "best":
+      tone({ freq: 660, duration: 0.07, type: "sine", gain: 0.09 });
+      break;
+    case "brilliant": {
+      // Rising bell arpeggio + a high shimmer = "something special happened".
+      const notes = [880, 1108, 1320];
+      notes.forEach((freq, index) => {
+        tone({
+          freq,
+          duration: 0.1,
+          type: "triangle",
+          gain: 0.09,
+          delay: index * 0.05,
+        });
+      });
+      tone({ freq: 1760, duration: 0.22, type: "sine", gain: 0.06, delay: 0.12 });
+      break;
+    }
+    case "great":
+      tone({ freq: 587, duration: 0.09, type: "triangle", gain: 0.09 });
+      tone({ freq: 784, duration: 0.12, type: "triangle", gain: 0.09, delay: 0.08 });
+      break;
+    case "inaccuracy":
+      tone({ freq: 300, duration: 0.09, type: "triangle", gain: 0.07, sweepTo: 250 });
+      break;
+    case "mistake":
+      tone({ freq: 360, duration: 0.1, type: "sawtooth", gain: 0.06, sweepTo: 230 });
+      tone({ freq: 200, duration: 0.16, type: "triangle", gain: 0.06, delay: 0.1 });
+      break;
+    case "blunder":
+      // Dissonant low double-thud — deliberately unpleasant.
+      tone({ freq: 190, duration: 0.14, type: "square", gain: 0.08, sweepTo: 160 });
+      tone({ freq: 95, duration: 0.2, type: "triangle", gain: 0.1, delay: 0.06 });
       break;
   }
 }

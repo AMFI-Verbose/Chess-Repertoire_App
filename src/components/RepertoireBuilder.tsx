@@ -17,20 +17,15 @@ import { loadMutedPreference, play, setMuted } from "@/lib/sound";
 import {
   addMove,
   deleteSubtree,
-  findTranspositions,
+  describePosition,
   importPgn,
   saveComment,
   setMainLine,
-  type TranspositionHit,
+  type PositionDescription,
 } from "@/app/actions";
 
-/** One row of the Opening reference table, passed down from the server. */
-type OpeningRow = {
-  eco: string;
-  name: string;
-  movesUci: string;
-  ply: number;
-};
+import ModeTabs from "@/components/ModeTabs";
+import { DARK_SQUARE, LIGHT_SQUARE } from "@/lib/boardTheme";
 
 type Pending = {
   san: string;
@@ -45,13 +40,11 @@ export default function RepertoireBuilder({
   name,
   side,
   initialNodes,
-  openings,
 }: {
   repertoireId: string;
   name: string;
   side: "white" | "black";
   initialNodes: NodeDTO[];
-  openings: OpeningRow[];
 }) {
   // The move tree lives in React state, seeded from the server. Each mutation is
   // applied locally first (optimistic UI) and then persisted by a server action.
@@ -65,10 +58,12 @@ export default function RepertoireBuilder({
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [busy, setBusy] = useState(false);
   const [soundOn, setSoundOn] = useState(true);
-  const [transpositions, setTranspositions] = useState<TranspositionHit[]>([]);
+  const [description, setDescription] = useState<PositionDescription>({
+    opening: null,
+    transpositions: [],
+  });
 
   const current = nodes.find((n) => n.id === currentId) ?? root;
-  const currentFen = current?.fen ?? "";
 
   // The mute preference lives in localStorage; read it once on mount.
   useEffect(() => {
@@ -98,46 +93,39 @@ export default function RepertoireBuilder({
     return result;
   }, [nodes, current]);
 
-  // ---- Auto-detection #1: opening name -----------------------------------
-  // Longest-prefix match against the Opening reference table. Entirely in
-  // memory, so the badge updates the instant you navigate.
-  const detectedOpening = useMemo(() => {
-    const line = path
-      .filter((n) => n.ply > 0)
-      .map((n) => n.uci)
-      .join(" ");
-    if (line.length === 0) return null;
+  // ---- Auto-detection: one server round trip per navigation -------------
+  // The client sends every position key along the current line; the server
+  // answers "what opening is this?" and "where else does this position occur?"
+  const pathKeys = useMemo(
+    () => path.map((node) => normalizedFen(node.fen)),
+    [path],
+  );
+  const pathSignature = pathKeys.join("|");
 
-    let best: OpeningRow | null = null;
-    for (const opening of openings) {
-      const isPrefix =
-        line === opening.movesUci || line.startsWith(`${opening.movesUci} `);
-      if (isPrefix && (!best || opening.ply > best.ply)) best = opening;
-    }
-    return best;
-  }, [path, openings]);
-
-  // ---- Auto-detection #2: transpositions in other repertoires -----------
   useEffect(() => {
-    if (!currentFen) return;
+    if (pathSignature.length === 0) return;
     let alive = true;
 
-    findTranspositions({
-      normFen: normalizedFen(currentFen),
+    describePosition({
+      normFens: pathSignature.split("|"),
       excludeRepertoireId: repertoireId,
     })
-      .then((hits) => {
-        if (alive) setTranspositions(hits);
+      .then((result) => {
+        if (alive) setDescription(result);
       })
       .catch(() => {
-        if (alive) setTranspositions([]);
+        // Detection is a nicety — never break the builder over it.
+        if (alive) setDescription({ opening: null, transpositions: [] });
       });
 
     // Navigating quickly must not let an old response overwrite a newer one.
     return () => {
       alive = false;
     };
-  }, [currentFen, repertoireId]);
+  }, [pathSignature, repertoireId]);
+
+  const detectedOpening = description.opening;
+  const transpositions = description.transpositions;
 
   const targets = useMemo(
     () => (selected ? legalTargets(current?.fen ?? "", selected) : []),
@@ -192,6 +180,34 @@ export default function RepertoireBuilder({
   }, [selected, targets, current]);
 
   const mainChild = children.find((c) => c.isMain) ?? children[0];
+
+  // ---- Keyboard navigation -----------------------------------------------
+  // ← walks back one move, → walks forward down the main line. This is the
+  // single most-used gesture when studying a repertoire, so it is global
+  // (window-level) rather than requiring focus on the board.
+  useEffect(() => {
+    function onKeyDown(event: KeyboardEvent) {
+      const target = event.target as HTMLElement | null;
+      if (target) {
+        const tag = target.tagName;
+        if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
+        if (target.isContentEditable) return;
+      }
+
+      if (event.key === "ArrowLeft") {
+        if (!current?.parentId) return;
+        event.preventDefault();
+        goTo(current.parentId);
+      } else if (event.key === "ArrowRight") {
+        if (!mainChild) return;
+        event.preventDefault();
+        goTo(mainChild.id);
+      }
+    }
+
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  });
 
   if (!current) {
     return (
@@ -375,6 +391,7 @@ export default function RepertoireBuilder({
             </span>
           )}
           <div className="ml-auto flex items-center gap-2">
+            <ModeTabs repertoireId={repertoireId} active="build" />
             <button
               onClick={() => {
                 const next = !soundOn;
@@ -413,8 +430,8 @@ export default function RepertoireBuilder({
                 squareStyles,
                 allowDrawingArrows: true,
                 animationDurationInMs: 160,
-                darkSquareStyle: { backgroundColor: "#4a5766" },
-                lightSquareStyle: { backgroundColor: "#c9d4e0" },
+                darkSquareStyle: DARK_SQUARE,
+                lightSquareStyle: LIGHT_SQUARE,
               }}
             />
           </div>
