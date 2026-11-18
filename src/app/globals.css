@@ -1,0 +1,39 @@
+@import "tailwindcss";
+
+/* Design tokens. Change a colour here and the whole app follows. */
+:root {
+  --bg: #0b0e14;
+  --panel: #12161f;
+  --panel-2: #171d28;
+  --line: #242c3a;
+  --text: #e8edf5;
+  --muted: #8b95a7;
+  --accent: #6fbf9b;
+}
+
+@theme inline {
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
+}
+
+html,
+body {
+  height: 100%;
+}
+
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+button {
+  cursor: pointer;
+}
+
+/* Keep the board crisp: no text selection while dragging pieces around. */
+[id="repertoire-board"] {
+  user-select: none;
+  touch-action: manipulation;
+}

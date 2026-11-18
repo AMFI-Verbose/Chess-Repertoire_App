@@ -1,0 +1,71 @@
+// Prisma schema — the single source of truth for your database.
+// Every time you change this file you run `npx prisma migrate dev`,
+// which diffs it against the real database and generates a migration.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+/// One opening repertoire, e.g. "White: Italian Game" or "Black: Najdorf".
+model Repertoire {
+  id          String   @id @default(cuid())
+  name        String
+  side        String // "white" | "black" — which colour you play these lines as
+  description String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  nodes Node[]
+
+  @@index([createdAt])
+}
+
+/// One node = one position in the move tree.
+/// The node stores the move that *leads to* it (san/uci) plus the resulting FEN,
+/// so walking up via `parent` reconstructs the whole line.
+/// The root node exists exactly once per repertoire: ply 0, no move, starting FEN.
+model Node {
+  id           String     @id @default(cuid())
+  repertoireId String
+  repertoire   Repertoire @relation(fields: [repertoireId], references: [id], onDelete: Cascade)
+
+  parentId String?
+  parent   Node?   @relation("MoveTree", fields: [parentId], references: [id], onDelete: Cascade)
+  children Node[]  @relation("MoveTree")
+
+  san     String // "Nf3"
+  uci     String // "g1f3" — machine-stable id for the move
+  fen     String // position AFTER the move
+  ply     Int    // half-move number: root = 0, 1.e4 = 1, ...e5 = 2
+  comment String? // your own note on this position
+  isMain  Boolean @default(false) // the "main line" child is highlighted in the tree
+
+  review Review?
+
+  createdAt DateTime @default(now())
+
+  // Two sibling moves can never be the same move.
+  @@unique([parentId, uci])
+  @@index([repertoireId])
+  @@index([parentId])
+}
+
+/// Spaced-repetition card attached to a position (Milestone 3).
+/// SM-2 style scheduling: interval grows when you get it right, resets when you don't.
+model Review {
+  id     String @id @default(cuid())
+  nodeId String @unique
+  node   Node   @relation(fields: [nodeId], references: [id], onDelete: Cascade)
+
+  attempts   Int       @default(0)
+  correct    Int       @default(0)
+  interval   Int       @default(1) // days until next review
+  ease       Float     @default(2.5) // multiplier applied on each success
+  dueAt      DateTime  @default(now())
+  lastSeenAt DateTime?
+}
