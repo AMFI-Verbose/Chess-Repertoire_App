@@ -41,6 +41,10 @@ model Node {
   san     String // "Nf3"
   uci     String // "g1f3" — machine-stable id for the move
   fen     String // position AFTER the move
+  /// "Board turn castling en-passant" only — the halfmove clock and move number
+  /// are dropped, so the SAME position reached by a different move order
+  /// produces the SAME key. That is what makes transpositions detectable.
+  normFen String @default("")
   ply     Int    // half-move number: root = 0, 1.e4 = 1, ...e5 = 2
   comment String? // your own note on this position
   isMain  Boolean @default(false) // the "main line" child is highlighted in the tree
@@ -53,6 +57,21 @@ model Node {
   @@unique([parentId, uci])
   @@index([repertoireId])
   @@index([parentId])
+  @@index([normFen])
+}
+
+/// Reference data: recognised opening names keyed by exact move sequence.
+/// Detection = find the longest entry whose `movesUci` prefixes your current line.
+/// This is a curated subset of ECO, not the whole 500-code encyclopaedia —
+/// extend it by adding rows, nothing else in the app needs to change.
+model Opening {
+  id       String @id @default(cuid())
+  eco      String // "B90"
+  name     String // "Sicilian Defence, Najdorf Variation"
+  movesUci String // "e2e4 c7c5 g1f3 d7d6 d2d4 cxd4 f3d4 g8f6 b1c3 a7a6"
+  ply      Int // how many half-moves this entry covers
+
+  @@index([ply])
 }
 
 /// Spaced-repetition card attached to a position (Milestone 3).

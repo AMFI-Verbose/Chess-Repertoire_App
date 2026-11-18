@@ -10,6 +10,7 @@ import { redirect } from "next/navigation";
 import { prisma } from "@/lib/prisma";
 import {
   START_FEN,
+  normalizedFen,
   parsePgnGame,
   splitPgnGames,
   type PgnMove,
@@ -102,6 +103,7 @@ export async function addMove(input: {
       san: input.san,
       uci: input.uci,
       fen: input.fen,
+      normFen: normalizedFen(input.fen),
       ply: parent.ply + 1,
       isMain: siblingCount === 0,
     },
@@ -224,6 +226,7 @@ export async function importPgn(input: {
               san: move.san,
               uci: move.uci,
               fen: move.fen,
+              normFen: normalizedFen(move.fen),
               ply: cursorPly + 1,
               isMain: siblings === 0, // first child of a position = main line
             },
@@ -250,4 +253,84 @@ export async function importPgn(input: {
     gamesFailed,
     movesWalked,
   };
+}
+
+export type TranspositionHit = {
+  repertoireId: string;
+  repertoireName: string;
+  nodeId: string;
+  sanPath: string[];
+};
+
+/**
+ * Auto-detection: does the current position also occur in ANOTHER repertoire?
+ *
+ * That is the whole point of `normFen`. A position reached by 1.e4 c5 2.Nf3 d6
+ * and by 1.e4 d6 2.d4 c5 3.Nf3 is the same position, so both tree nodes share
+ * one `normFen` value and one indexed lookup finds them. This is how you discover
+ * that your White and Black repertoires meet in the same middlegame.
+ */
+export async function findTranspositions(input: {
+  normFen: string;
+  excludeRepertoireId: string;
+}): Promise<TranspositionHit[]> {
+  const matches = await prisma.node.findMany({
+    where: {
+      normFen: input.normFen,
+      ply: { gt: 0 },
+      repertoireId: { not: input.excludeRepertoireId },
+    },
+    include: { repertoire: { select: { id: true, name: true } } },
+    take: 50,
+  });
+
+  if (matches.length === 0) return [];
+
+  // One extra query loads every node of the involved repertoires, so building
+  // the SAN path for each hit costs no further round trips.
+  const repertoireIds = Array.from(new Set(matches.map((m) => m.repertoireId)));
+  const allNodes = await prisma.node.findMany({
+    where: { repertoireId: { in: repertoireIds } },
+  });
+
+  const parentIndex = new Map<
+    string,
+    { parentId: string | null; san: string; ply: number }
+  >();
+  for (const node of allNodes) {
+    parentIndex.set(node.id, {
+      parentId: node.parentId,
+      san: node.san,
+      ply: node.ply,
+    });
+  }
+
+  const pathOf = (nodeId: string): string[] => {
+    const parts: string[] = [];
+    let cursor = parentIndex.get(nodeId);
+    let guard = 0;
+    while (cursor && cursor.ply > 0 && guard < 300) {
+      parts.unshift(cursor.san);
+      cursor = cursor.parentId ? parentIndex.get(cursor.parentId) : undefined;
+      guard += 1;
+    }
+    return parts;
+  };
+
+  const hits: TranspositionHit[] = [];
+  const seen = new Set<string>();
+
+  for (const match of matches) {
+    if (seen.has(match.repertoireId)) continue; // one hit per repertoire
+    seen.add(match.repertoireId);
+    hits.push({
+      repertoireId: match.repertoireId,
+      repertoireName: match.repertoire.name,
+      nodeId: match.id,
+      sanPath: pathOf(match.id),
+    });
+    if (hits.length >= 5) break;
+  }
+
+  return hits;
 }

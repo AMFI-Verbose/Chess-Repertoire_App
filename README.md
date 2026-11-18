@@ -112,6 +112,31 @@ fixes it.
 
 ---
 
+### e) `normFen` — the position key that powers auto-detection
+
+A FEN string looks like:
+
+```
+rnbqkbnr/pppppppp/...  w KQkq -  0 1
+└────── board ──────┘  │ │      │ │ └ move number
+                       │ │      │ └ halfmove clock
+                       │ │      └ en-passant square
+                       │ └ castling rights
+                       └ side to move
+```
+
+The last two fields are bookkeeping, not chess. Drop them (`.slice(0, 4)`) and you
+get a key that is identical for the **same position reached by different move
+orders** — a transposition. `Node.normFen` stores that key, `@@index([normFen])`
+makes "who else has this position?" a single indexed lookup instead of a scan.
+
+Opening detection uses the other direction: the `Opening` table stores each
+opening as a UCI move sequence, and the app keeps the **longest** entry that
+prefixes your current line. So `1.e4 c5 2.Nf3 d6` gives B50, and adding `...a6`
+moves you to B90 — no extra queries, because the whole table is 68 rows.
+
+---
+
 ## 4. What's done, what's next
 
 ### Done
@@ -124,6 +149,9 @@ fixes it.
 - [x] Delete a branch (with confirmation)
 - [x] Persistence in SQLite
 - [x] PGN import — merges into the tree instead of duplicating
+- [x] Auto-detected opening name (ECO) as you walk a line
+- [x] Transposition detection across repertoires
+- [x] Sound effects (Web Audio, no asset files) + last-move / check visuals
 
 ### Milestone 3 — Spaced repetition (the reason this app exists)
 The `Review` table is already in the schema, unused. Wire it up:

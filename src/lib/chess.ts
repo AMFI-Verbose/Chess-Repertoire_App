@@ -7,6 +7,9 @@ export type MoveResult = {
   san: string; // "Nf3"  — for humans
   uci: string; // "g1f3" — stable machine id
   fen: string; // position AFTER the move
+  captured: boolean; // did this move take a piece?
+  check: boolean; // does it give check?
+  checkmate: boolean;
 };
 
 /**
@@ -28,10 +31,36 @@ export function tryMove(
       san: move.san,
       uci: `${move.from}${move.to}${move.promotion ?? ""}`,
       fen: game.fen(),
+      captured: Boolean(move.captured),
+      check: game.inCheck(),
+      checkmate: game.isCheckmate(),
     };
   } catch {
     return null;
   }
+}
+
+/**
+ * The four fields that define a position for transposition purposes:
+ * board, side to move, castling rights, en-passant square.
+ * The halfmove clock and fullmove number are cosmetic, so they are dropped —
+ * otherwise the same position reached on move 6 and move 12 would look different.
+ */
+export function normalizedFen(fen: string): string {
+  return fen.split(" ").slice(0, 4).join(" ");
+}
+
+/** Square of the king currently in check, or null. Drives the red check flash. */
+export function kingInCheckSquare(fen: string): string | null {
+  const game = new Chess(fen);
+  if (!game.inCheck()) return null;
+  const turn = game.turn();
+  for (const row of game.board()) {
+    for (const cell of row) {
+      if (cell && cell.type === "k" && cell.color === turn) return cell.square;
+    }
+  }
+  return null;
 }
 
 /** Every legal destination square for a piece on `from` (used to draw dots). */
