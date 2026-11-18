@@ -1,18 +1,36 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { CSSProperties } from "react";
 import Link from "next/link";
 import { Chessboard } from "react-chessboard";
-import { legalTargets, moveNumberOf, tryMove, turnOf } from "@/lib/chess";
+import {
+  kingInCheckSquare,
+  legalTargets,
+  moveNumberOf,
+  normalizedFen,
+  tryMove,
+  turnOf,
+} from "@/lib/chess";
 import type { NodeDTO } from "@/lib/types";
+import { loadMutedPreference, play, setMuted } from "@/lib/sound";
 import {
   addMove,
   deleteSubtree,
+  findTranspositions,
   importPgn,
   saveComment,
   setMainLine,
+  type TranspositionHit,
 } from "@/app/actions";
+
+/** One row of the Opening reference table, passed down from the server. */
+type OpeningRow = {
+  eco: string;
+  name: string;
+  movesUci: string;
+  ply: number;
+};
 
 type Pending = {
   san: string;
@@ -27,11 +45,13 @@ export default function RepertoireBuilder({
   name,
   side,
   initialNodes,
+  openings,
 }: {
   repertoireId: string;
   name: string;
   side: "white" | "black";
   initialNodes: NodeDTO[];
+  openings: OpeningRow[];
 }) {
   // The move tree lives in React state, seeded from the server. Each mutation is
   // applied locally first (optimistic UI) and then persisted by a server action.
@@ -44,8 +64,16 @@ export default function RepertoireBuilder({
   const [orientation, setOrientation] = useState<"white" | "black">(side);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [soundOn, setSoundOn] = useState(true);
+  const [transpositions, setTranspositions] = useState<TranspositionHit[]>([]);
 
   const current = nodes.find((n) => n.id === currentId) ?? root;
+  const currentFen = current?.fen ?? "";
+
+  // The mute preference lives in localStorage; read it once on mount.
+  useEffect(() => {
+    setSoundOn(!loadMutedPreference());
+  }, []);
 
   // Children of the current position = moves you have already stored from here.
   const children = useMemo(
@@ -70,28 +98,98 @@ export default function RepertoireBuilder({
     return result;
   }, [nodes, current]);
 
+  // ---- Auto-detection #1: opening name -----------------------------------
+  // Longest-prefix match against the Opening reference table. Entirely in
+  // memory, so the badge updates the instant you navigate.
+  const detectedOpening = useMemo(() => {
+    const line = path
+      .filter((n) => n.ply > 0)
+      .map((n) => n.uci)
+      .join(" ");
+    if (line.length === 0) return null;
+
+    let best: OpeningRow | null = null;
+    for (const opening of openings) {
+      const isPrefix =
+        line === opening.movesUci || line.startsWith(`${opening.movesUci} `);
+      if (isPrefix && (!best || opening.ply > best.ply)) best = opening;
+    }
+    return best;
+  }, [path, openings]);
+
+  // ---- Auto-detection #2: transpositions in other repertoires -----------
+  useEffect(() => {
+    if (!currentFen) return;
+    let alive = true;
+
+    findTranspositions({
+      normFen: normalizedFen(currentFen),
+      excludeRepertoireId: repertoireId,
+    })
+      .then((hits) => {
+        if (alive) setTranspositions(hits);
+      })
+      .catch(() => {
+        if (alive) setTranspositions([]);
+      });
+
+    // Navigating quickly must not let an old response overwrite a newer one.
+    return () => {
+      alive = false;
+    };
+  }, [currentFen, repertoireId]);
+
   const targets = useMemo(
     () => (selected ? legalTargets(current?.fen ?? "", selected) : []),
     [selected, current?.fen],
   );
 
-  // Dot overlays. `backgroundImage` (not `background`) keeps the square colour
-  // underneath — `background` would reset it to transparent.
+  // Layered square overlays: last move → check pulse → selection + legal dots.
+  // `backgroundImage` (not `background`) keeps the square colour underneath —
+  // `background` would reset it to transparent.
   const squareStyles = useMemo(() => {
     const styles: Record<string, CSSProperties> = {};
-    if (!selected) return styles;
-    styles[selected] = {
-      backgroundImage:
-        "linear-gradient(rgba(111,191,155,.35), rgba(111,191,155,.35))",
-    };
-    for (const square of targets) {
-      styles[square] = {
+
+    // 1. Last move: where the piece came from and landed.
+    if (current && current.ply > 0 && current.uci.length >= 4) {
+      const from = current.uci.slice(0, 2);
+      const to = current.uci.slice(2, 4);
+      styles[from] = {
         backgroundImage:
-          "radial-gradient(circle, rgba(111,191,155,.9) 21%, rgba(111,191,155,0) 23%)",
+          "linear-gradient(rgba(111,191,155,.18), rgba(111,191,155,.18))",
+      };
+      styles[to] = {
+        backgroundImage:
+          "linear-gradient(rgba(111,191,155,.34), rgba(111,191,155,.34))",
       };
     }
+
+    // 2. Check: a red radial glow plus a CSS animation defined in globals.css.
+    const checkSquare = current ? kingInCheckSquare(current.fen) : null;
+    if (checkSquare) {
+      styles[checkSquare] = {
+        backgroundImage:
+          "radial-gradient(circle, rgba(255,72,72,.62) 0%, rgba(255,72,72,.45) 55%, rgba(255,72,72,0) 78%)",
+        animation: "check-pulse 1.1s ease-in-out infinite",
+      };
+    }
+
+    // 3. Selection + legal destination dots sit on top of everything.
+    if (selected) {
+      styles[selected] = {
+        backgroundImage:
+          "linear-gradient(rgba(111,191,155,.35), rgba(111,191,155,.35))",
+      };
+      for (const square of targets) {
+        styles[square] = {
+          backgroundImage:
+            "radial-gradient(circle, rgba(111,191,155,.9) 21%, rgba(111,191,155,0) 23%)",
+        };
+      }
+    }
+
     return styles;
-  }, [selected, targets]);
+  }, [selected, targets, current]);
 
   const mainChild = children.find((c) => c.isMain) ?? children[0];
 
@@ -118,17 +216,22 @@ export default function RepertoireBuilder({
    */
   function attempt(from: string, to: string): boolean {
     const result = tryMove(current!.fen, from, to);
-    if (!result) return false;
+    if (!result) {
+      play("error"); // illegal move — the piece snaps back
+      return false;
+    }
 
     const existing = nodes.find(
       (n) => n.parentId === current!.id && n.uci === result.uci,
     );
     if (existing) {
+      play("navigate"); // walking into a position you already stored
       goTo(existing.id);
       return true;
     }
 
     // Legal but not stored yet — offer to add it.
+    play(result.check ? "check" : result.captured ? "capture" : "move");
     setSelected(null);
     setPending({ ...result, from, to });
     return false;
@@ -182,6 +285,9 @@ export default function RepertoireBuilder({
         prev.some((n) => n.id === created.id) ? prev : [...prev, created],
       );
       goTo(created.id);
+      play("success");
+    } catch {
+      play("error");
     } finally {
       setBusy(false);
     }
@@ -204,6 +310,7 @@ export default function RepertoireBuilder({
     await deleteSubtree(current!.id);
     setNodes((prev) => prev.filter((n) => !doomed.has(n.id)));
     goTo(current!.parentId ?? root!.id);
+    play("delete");
   }
 
   async function handleSetMain(nodeId: string) {
@@ -226,6 +333,7 @@ export default function RepertoireBuilder({
   function handleImported(created: NodeDTO[]) {
     if (created.length === 0) return;
     setNodes((prev) => [...prev, ...created]);
+    play("success");
   }
 
   function jumpToMainlineEnd(startId: string) {
@@ -253,7 +361,32 @@ export default function RepertoireBuilder({
           <span className="rounded-full border border-[var(--line)] px-2 py-0.5 text-[11px] uppercase tracking-wider text-[var(--muted)]">
             {side} repertoire
           </span>
+          {detectedOpening && (
+            <span
+              key={`${detectedOpening.eco}-${detectedOpening.name}`}
+              className="animate-pop flex items-center gap-1.5 rounded-full border border-[var(--accent)]/40 bg-[var(--accent)]/10 px-2.5 py-0.5 text-[11px]"
+            >
+              <span className="font-mono font-semibold text-[var(--accent)]">
+                {detectedOpening.eco}
+              </span>
+              <span className="max-w-[240px] truncate">
+                {detectedOpening.name}
+              </span>
+            </span>
+          )}
           <div className="ml-auto flex items-center gap-2">
+            <button
+              onClick={() => {
+                const next = !soundOn;
+                setSoundOn(next);
+                setMuted(!next);
+                if (next) play("navigate");
+              }}
+              className="rounded-lg border border-[var(--line)] px-2.5 py-1.5 text-xs text-[var(--muted)] transition hover:border-[var(--accent)] hover:text-[var(--text)]"
+              title={soundOn ? "Mute sound effects" : "Unmute sound effects"}
+            >
+              {soundOn ? "♪ On" : "♪ Off"}
+            </button>
             <button
               onClick={() =>
                 setOrientation((prev) => (prev === "white" ? "black" : "white"))
@@ -269,7 +402,7 @@ export default function RepertoireBuilder({
       <main className="mx-auto grid max-w-6xl gap-8 px-6 py-8 lg:grid-cols-[minmax(0,1fr)_380px]">
         {/* ---------- Board column ---------- */}
         <section className="flex flex-col items-center gap-4">
-          <div className="w-full max-w-[540px] overflow-hidden rounded-xl border border-[var(--line)] shadow-2xl shadow-black/40">
+          <div className="board-glow w-full max-w-[540px] overflow-hidden rounded-xl border border-[var(--line)] shadow-2xl shadow-black/40">
             <Chessboard
               options={{
                 id: "repertoire-board",
@@ -325,7 +458,7 @@ export default function RepertoireBuilder({
           </div>
 
           {pending && (
-            <div className="flex w-full max-w-[540px] items-center gap-3 rounded-xl border border-[var(--accent)]/40 bg-[var(--accent)]/10 px-4 py-3">
+            <div className="animate-rise flex w-full max-w-[540px] items-center gap-3 rounded-xl border border-[var(--accent)]/40 bg-[var(--accent)]/10 px-4 py-3 shadow-lg shadow-[var(--accent)]/10">
               <span className="text-sm">
                 <span className="font-mono font-semibold">{pending.san}</span> is
                 not in this repertoire yet.
@@ -349,6 +482,52 @@ export default function RepertoireBuilder({
 
         {/* ---------- Side panel ---------- */}
         <aside className="flex flex-col gap-4">
+          <Panel title="Detected opening">
+            {detectedOpening ? (
+              <div
+                key={`${detectedOpening.eco}-${detectedOpening.name}`}
+                className="animate-pop flex items-start gap-2.5"
+              >
+                <span className="mt-0.5 rounded-md bg-[var(--accent)]/15 px-1.5 py-0.5 font-mono text-[11px] font-semibold text-[var(--accent)]">
+                  {detectedOpening.eco}
+                </span>
+                <span className="text-sm leading-snug">
+                  {detectedOpening.name}
+                </span>
+              </div>
+            ) : (
+              <p className="text-xs text-[var(--muted)]">
+                {current.ply === 0
+                  ? "Starting position — play a move to identify the opening."
+                  : "No recognised opening for this move order."}
+              </p>
+            )}
+          </Panel>
+
+          {transpositions.length > 0 && (
+            <Panel title="Transposition detected">
+              <div className="flex flex-col gap-2">
+                <p className="text-xs text-[var(--muted)]">
+                  This exact position also occurs in:
+                </p>
+                {transpositions.map((hit) => (
+                  <Link
+                    key={hit.repertoireId}
+                    href={`/r/${hit.repertoireId}`}
+                    className="animate-rise rounded-lg border border-[var(--accent)]/30 bg-[var(--accent)]/[.06] px-3 py-2 transition hover:border-[var(--accent)]"
+                  >
+                    <span className="block text-sm font-medium">
+                      {hit.repertoireName}
+                    </span>
+                    <span className="mt-0.5 block truncate font-mono text-[11px] text-[var(--muted)]">
+                      {hit.sanPath.join(" ")}
+                    </span>
+                  </Link>
+                ))}
+              </div>
+            </Panel>
+          )}
+
           <Panel title="Line">
             {path.filter((n) => n.ply > 0).length === 0 ? (
               <p className="text-xs text-[var(--muted)]">
@@ -552,6 +731,7 @@ function ImportPanel({
 
       if (result.createdNodes.length > 0) setPgn("");
     } catch (error) {
+      play("error");
       setStatus(error instanceof Error ? error.message : "Import failed");
     } finally {
       setBusy(false);
