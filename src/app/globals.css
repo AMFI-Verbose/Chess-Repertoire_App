@@ -1,14 +1,15 @@
 @import "tailwindcss";
 
-/* Design tokens. Change a colour here and the whole app follows. */
+/* Design tokens. Change a colour here and the whole app follows.
+   Palette follows Lichess's warm dark surface with Chess.com's green accent. */
 :root {
-  --bg: #0b0e14;
-  --panel: #12161f;
-  --panel-2: #171d28;
-  --line: #242c3a;
-  --text: #e8edf5;
-  --muted: #8b95a7;
-  --accent: #6fbf9b;
+  --bg: #161512;
+  --panel: #211f1e;
+  --panel-2: #2b2926;
+  --line: #37332f;
+  --text: #e9e6e1;
+  --muted: #9a958c;
+  --accent: #81b64c;
 }
 
 @theme inline {
@@ -33,7 +34,9 @@ button {
 }
 
 /* Keep the board crisp: no text selection while dragging pieces around. */
-[id="repertoire-board"] {
+[id="repertoire-board"],
+[id="play-board"],
+[id="review-board"] {
   user-select: none;
   touch-action: manipulation;
 }
@@ -103,7 +106,7 @@ button {
   border-radius: 20px;
   background: radial-gradient(
     120% 120% at 50% 0%,
-    rgba(111, 191, 155, 0.18),
+    rgba(129, 182, 76, 0.18),
     transparent 62%
   );
   pointer-events: none;

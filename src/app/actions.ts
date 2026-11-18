@@ -334,3 +334,60 @@ export async function findTranspositions(input: {
 
   return hits;
 }
+
+export type PositionDescription = {
+  opening: { eco: string; name: string; ply: number } | null;
+  transpositions: TranspositionHit[];
+};
+
+/**
+ * One round trip on every navigation, answering both auto-detection questions:
+ *
+ * 1. "What opening is this?" — the client sends the normalized FEN of every
+ *    position in the current line. We walk from the deepest position back to
+ *    the root and return the first one that exists in the Lichess ECO table.
+ *    That reproduces Lichess's behaviour: an unnamed move still reports the
+ *    opening it belongs to.
+ * 2. "Does this position occur in another repertoire?" — delegated to
+ *    findTranspositions.
+ */
+export async function describePosition(input: {
+  normFens: string[]; // root → current, deepest last
+  excludeRepertoireId: string;
+}): Promise<PositionDescription> {
+  const normFens = input.normFens.filter((f) => f.length > 0);
+  if (normFens.length === 0) {
+    return { opening: null, transpositions: [] };
+  }
+
+  const rows = await prisma.opening.findMany({
+    where: { epd: { in: normFens } },
+    select: { eco: true, name: true, ply: true, epd: true },
+  });
+
+  let opening: PositionDescription["opening"] = null;
+  if (rows.length > 0) {
+    // Deepest match wins (most specific name for this position).
+    const byEpd = new Map<string, { eco: string; name: string; ply: number }>();
+    for (const row of rows) {
+      const current = byEpd.get(row.epd);
+      if (!current || row.ply > current.ply) {
+        byEpd.set(row.epd, { eco: row.eco, name: row.name, ply: row.ply });
+      }
+    }
+    for (let index = normFens.length - 1; index >= 0; index -= 1) {
+      const hit = byEpd.get(normFens[index]);
+      if (hit) {
+        opening = hit;
+        break;
+      }
+    }
+  }
+
+  const transpositions = await findTranspositions({
+    normFen: normFens[normFens.length - 1],
+    excludeRepertoireId: input.excludeRepertoireId,
+  });
+
+  return { opening, transpositions };
+}
