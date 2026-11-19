@@ -54,9 +54,13 @@ button {
   }
 }
 
+/* Entering animations deliberately start from opacity 0.55, not 0.
+   A 0 start means "if this animation never runs — background tab, reduced
+   motion, a paused compositor — the content is invisible". Starting part-way
+   visible keeps the motion but guarantees legibility. */
 @keyframes rise-in {
   from {
-    opacity: 0;
+    opacity: 0.55;
     transform: translateY(6px);
   }
   to {
@@ -67,7 +71,7 @@ button {
 
 @keyframes pop-in {
   from {
-    opacity: 0;
+    opacity: 0.55;
     transform: scale(0.96);
   }
   to {

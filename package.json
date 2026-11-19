@@ -1,12 +1,15 @@
 {
-  "name": "new-chat",
+  "name": "chess-repertoire",
   "version": "0.1.0",
   "private": true,
   "scripts": {
+    "predev": "node scripts/copy-engine.mjs",
     "dev": "next dev",
+    "prebuild": "node scripts/copy-engine.mjs",
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
+    "db:setup": "prisma migrate deploy && npm run db:seed && npm run db:openings",
     "db:seed": "node scripts/seed.mjs",
     "db:openings": "node scripts/seed-openings-lichess.mjs",
     "db:backfill": "node scripts/backfill-normfen.mjs",

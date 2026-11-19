@@ -32,10 +32,14 @@ yarn-error.log*
 
 # env files (can opt-in for committing if needed)
 .env*
+!.env.example
 
 # local database — migrations are tracked, the data file is not
 /prisma/dev.db
 /prisma/dev.db-journal
+
+# Stockfish WASM binaries: regenerated from node_modules by scripts/copy-engine.mjs
+/public/engine/
 
 # vercel
 .vercel
