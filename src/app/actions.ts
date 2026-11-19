@@ -7,6 +7,7 @@
 
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
+import { Chess } from "chess.js";
 import { prisma } from "@/lib/prisma";
 import type { Prisma } from "@prisma/client";
 import {
@@ -457,4 +458,377 @@ export async function searchOpenings(input: {
     : rows;
 
   return bounded.slice(0, limit);
+}
+
+// ===========================================================================
+// Puzzles — daily tactics + a practice set
+// ===========================================================================
+
+export type PuzzleDTO = {
+  id: string;
+  fen: string;
+  solution: string; // space-separated UCI, starts with the solver's move
+  rating: number;
+  themes: string;
+  title: string;
+  source: string;
+};
+
+export type PuzzleStats = {
+  attempted: number;
+  solved: number;
+  streak: number;
+  accuracy: number;
+};
+
+type DbPuzzle = {
+  id: string;
+  fen: string;
+  solution: string;
+  rating: number;
+  themes: string;
+  title: string;
+  source: string;
+};
+
+function toPuzzleDTO(row: DbPuzzle): PuzzleDTO {
+  return {
+    id: row.id,
+    fen: row.fen,
+    solution: row.solution,
+    rating: row.rating,
+    themes: row.themes,
+    title: row.title,
+    source: row.source,
+  };
+}
+
+/** Local calendar date, so the daily puzzle flips at local midnight. */
+function today(): string {
+  return new Date().toLocaleDateString("sv-SE");
+}
+
+async function puzzleStats(): Promise<PuzzleStats> {
+  const [attempted, solved, recent] = await Promise.all([
+    prisma.puzzleAttempt.count(),
+    prisma.puzzleAttempt.count({ where: { solved: true } }),
+    prisma.puzzleAttempt.findMany({
+      orderBy: { createdAt: "desc" },
+      take: 50,
+      select: { solved: true },
+    }),
+  ]);
+
+  // Current streak = consecutive solved attempts from the most recent one back.
+  let streak = 0;
+  for (const attempt of recent) {
+    if (!attempt.solved) break;
+    streak += 1;
+  }
+
+  return {
+    attempted,
+    solved,
+    streak,
+    accuracy: attempted > 0 ? Math.round((solved / attempted) * 100) : 0,
+  };
+}
+
+/**
+ * Fetch and cache Lichess's daily puzzle. Their API returns the game up to the
+ * puzzle position plus a UCI solution, which is exactly our storage shape —
+ * so a live puzzle and a seeded one are indistinguishable downstream.
+ */
+async function cacheLichessDaily(day: string): Promise<DbPuzzle | null> {
+  try {
+    const response = await fetch("https://lichess.org/api/puzzle/daily", {
+      cache: "no-store",
+      signal: AbortSignal.timeout(8000),
+    });
+    if (!response.ok) return null;
+
+    const payload = (await response.json()) as {
+      game?: { id?: string };
+      puzzle: {
+        id: string;
+        initialPgn?: string;
+        fen?: string;
+        solution: string[];
+        rating?: number;
+        themes?: string[];
+      };
+    };
+
+    const puzzle = payload.puzzle;
+    if (!puzzle?.solution?.length) return null;
+
+    let fen = puzzle.fen ?? "";
+    if (!fen && puzzle.initialPgn) {
+      const game = new Chess();
+      game.loadPgn(puzzle.initialPgn);
+      fen = game.fen();
+    }
+    if (!fen) return null;
+
+    // Sanity check: every solution move must be legal from that position.
+    const board = new Chess(fen);
+    for (const uci of puzzle.solution) {
+      const move = board.move({
+        from: uci.slice(0, 2),
+        to: uci.slice(2, 4),
+        promotion: uci.length > 4 ? uci[4] : "q",
+      });
+      if (!move) return null;
+    }
+
+    return await prisma.puzzle.upsert({
+      where: { day },
+      update: {},
+      create: {
+        id: `lichess-${puzzle.id}`,
+        fen,
+        solution: puzzle.solution.join(" "),
+        rating: puzzle.rating ?? 1500,
+        themes: (puzzle.themes ?? []).join(" "),
+        title: "Lichess daily puzzle",
+        source: "lichess-daily",
+        day,
+      },
+      select: {
+        id: true,
+        fen: true,
+        solution: true,
+        rating: true,
+        themes: true,
+        title: true,
+        source: true,
+      },
+    });
+  } catch {
+    // Offline, rate-limited, or the shape changed — fall back to local content.
+    return null;
+  }
+}
+
+export async function getDailyPuzzle(): Promise<{
+  puzzle: PuzzleDTO;
+  stats: PuzzleStats;
+  isDaily: boolean;
+}> {
+  const day = today();
+
+  let row = await prisma.puzzle.findUnique({
+    where: { day },
+    select: {
+      id: true,
+      fen: true,
+      solution: true,
+      rating: true,
+      themes: true,
+      title: true,
+      source: true,
+    },
+  });
+
+  if (!row) row = await cacheLichessDaily(day);
+
+  let isDaily = true;
+  if (!row) {
+    // No cached daily and no network — serve a local puzzle instead.
+    isDaily = false;
+    row = await prisma.puzzle.findFirst({
+      where: { source: "seed" },
+      orderBy: { rating: "asc" },
+      select: {
+        id: true,
+        fen: true,
+        solution: true,
+        rating: true,
+        themes: true,
+        title: true,
+        source: true,
+      },
+    });
+  }
+
+  if (!row) throw new Error("No puzzles available — run `npm run db:content`");
+
+  return { puzzle: toPuzzleDTO(row), stats: await puzzleStats(), isDaily };
+}
+
+/** A random local puzzle, different from the one just shown. */
+export async function getPracticePuzzle(excludeId: string): Promise<{
+  puzzle: PuzzleDTO;
+  stats: PuzzleStats;
+}> {
+  const count = await prisma.puzzle.count();
+  if (count === 0) throw new Error("No puzzles available");
+
+  const skip = Math.floor(Math.random() * count);
+  const row = await prisma.puzzle.findFirst({
+    skip,
+    orderBy: { createdAt: "asc" },
+    where: count > 1 ? { id: { not: excludeId } } : undefined,
+    select: {
+      id: true,
+      fen: true,
+      solution: true,
+      rating: true,
+      themes: true,
+      title: true,
+      source: true,
+    },
+  });
+
+  if (!row) throw new Error("No puzzles available");
+
+  return { puzzle: toPuzzleDTO(row), stats: await puzzleStats() };
+}
+
+export async function submitPuzzleAttempt(input: {
+  puzzleId: string;
+  solved: boolean;
+}): Promise<PuzzleStats> {
+  await prisma.puzzleAttempt.create({
+    data: { puzzleId: input.puzzleId, solved: Boolean(input.solved) },
+  });
+  return puzzleStats();
+}
+
+// ===========================================================================
+// Studies + comments (the local "community" layer)
+// ===========================================================================
+
+export type StudySummary = {
+  id: string;
+  title: string;
+  subtitle: string;
+  eco: string;
+  plies: number;
+  commentCount: number;
+};
+
+export type CommentDTO = {
+  id: string;
+  author: string;
+  body: string;
+  createdAt: string;
+};
+
+export type StudyDetail = {
+  id: string;
+  title: string;
+  subtitle: string;
+  eco: string;
+  pgn: string;
+  comments: CommentDTO[];
+};
+
+export async function listStudies(): Promise<StudySummary[]> {
+  const rows = await prisma.study.findMany({
+    orderBy: { createdAt: "asc" },
+    include: { _count: { select: { comments: true } } },
+  });
+
+  return rows.map((row) => {
+    let plies = 0;
+    try {
+      const game = new Chess();
+      game.loadPgn(row.pgn);
+      plies = game.history().length;
+    } catch {
+      plies = 0;
+    }
+    return {
+      id: row.id,
+      title: row.title,
+      subtitle: row.subtitle,
+      eco: row.eco,
+      plies,
+      commentCount: row._count.comments,
+    };
+  });
+}
+
+export async function getStudy(id: string): Promise<StudyDetail | null> {
+  const row = await prisma.study.findUnique({
+    where: { id },
+    include: { comments: { orderBy: { createdAt: "asc" } } },
+  });
+  if (!row) return null;
+
+  return {
+    id: row.id,
+    title: row.title,
+    subtitle: row.subtitle,
+    eco: row.eco,
+    pgn: row.pgn,
+    comments: row.comments.map((comment) => ({
+      id: comment.id,
+      author: comment.author,
+      body: comment.body,
+      createdAt: comment.createdAt.toISOString(),
+    })),
+  };
+}
+
+export async function addComment(input: {
+  studyId: string;
+  author: string;
+  body: string;
+}): Promise<CommentDTO | null> {
+  const body = input.body.trim().slice(0, 600);
+  if (body.length === 0) return null;
+
+  const author = (input.author.trim() || "You").slice(0, 40);
+  const study = await prisma.study.findUnique({
+    where: { id: input.studyId },
+    select: { id: true },
+  });
+  if (!study) return null;
+
+  const comment = await prisma.comment.create({
+    data: { studyId: input.studyId, author, body },
+  });
+
+  revalidatePath(`/community/${input.studyId}`);
+  return {
+    id: comment.id,
+    author: comment.author,
+    body: comment.body,
+    createdAt: comment.createdAt.toISOString(),
+  };
+}
+
+/**
+ * Turn a study into a personal repertoire: create the vessel, then hand the
+ * PGN to the existing idempotent importer (no second copy of that logic).
+ */
+export async function addStudyToRepertoire(input: {
+  studyId: string;
+}): Promise<{ repertoireId: string } | null> {
+  const study = await prisma.study.findUnique({ where: { id: input.studyId } });
+  if (!study) return null;
+
+  const repertoire = await prisma.repertoire.create({
+    data: {
+      name: study.title.slice(0, 80),
+      side: "white",
+      nodes: {
+        create: {
+          san: "",
+          uci: "",
+          fen: START_FEN,
+          ply: 0,
+          isMain: true,
+          normFen: normalizedFen(START_FEN),
+        },
+      },
+    },
+  });
+
+  await importPgn({ repertoireId: repertoire.id, pgn: study.pgn });
+
+  revalidatePath("/");
+  return { repertoireId: repertoire.id };
 }

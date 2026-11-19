@@ -1,7 +1,8 @@
 # Chess Repertoire
 
 A personal chess opening trainer: build the lines you actually play, play them
-against Stockfish, and have every move graded like Lichess's analysis board.
+against Stockfish, and have every move graded like Lichess's analysis board —
+with a daily tactic and an annotated study library alongside it.
 
 Next.js 15 · TypeScript · Tailwind 4 · Prisma 6 · SQLite · chess.js · react-chessboard · Stockfish 19 (WASM)
 
@@ -15,6 +16,16 @@ Next.js 15 · TypeScript · Tailwind 4 · Prisma 6 · SQLite · chess.js · reac
 
 Plus a searchable **opening library**: 3,865 ECO lines, searchable by name,
 code (`B90`) or move sequence (`1.e4 c5`), each previewable on a board.
+
+### Puzzles and community
+
+| Puzzles | Community |
+|---|---|
+| A fresh tactic every day from Lichess's public API, cached locally so it works offline; a seeded practice set, solve streaks and accuracy stored in SQLite. | Annotated games (Morphy 1858, Anderssen 1851, Légal's trap) with a comment thread on each. Step through with ← / →, post a comment, or copy the whole game into a new repertoire in one click. |
+
+Both are deliberately local-first: there is no server and no account. The
+library ships with the app and the threads live in your own database — seeded
+comments are sample content.
 
 ### Screenshots
 
@@ -35,7 +46,7 @@ git clone https://github.com/<your-username>/Chess-Repertoire_App.git
 cd Chess-Repertoire_App
 npm install
 cp .env.example .env   # points at a local SQLite file
-npm run db:setup       # create the database, seed 2 sample repertoires + 3,865 openings
+npm run db:setup       # database + 2 sample repertoires + 3,865 openings + puzzles and studies
 npm run dev            # http://localhost:3000
 ```
 
@@ -51,6 +62,7 @@ copied out of `node_modules` automatically by `predev` / `prebuild`.
 | `npm run db:studio` | Prisma Studio — browse the tables |
 | `npm run db:openings` | Re-download the Lichess ECO table (needs network) |
 | `npm run db:seed` | Recreate the two sample repertoires |
+| `npm run db:content` | Load the built-in puzzle set and study library |
 | `npm run db:reset` | Wipe + migrate + reseed everything |
 
 ---

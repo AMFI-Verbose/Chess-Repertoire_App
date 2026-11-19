@@ -117,3 +117,17 @@ button {
   z-index: -1;
   animation: glow-breathe 7s ease-in-out infinite;
 }
+
+/* Wrong-move feedback for the puzzle trainer: a short, physical refusal.
+   Uses translate only, so it also reads fine with reduced motion. */
+@keyframes shake {
+  0%, 100% { transform: translateX(0); }
+  20% { transform: translateX(-5px); }
+  40% { transform: translateX(5px); }
+  60% { transform: translateX(-3px); }
+  80% { transform: translateX(3px); }
+}
+
+.animate-shake {
+  animation: shake 0.4s ease-in-out;
+}
