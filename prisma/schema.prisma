@@ -44,8 +44,8 @@ model Node {
   /// "Board turn castling en-passant" only — the halfmove clock and move number
   /// are dropped, so the SAME position reached by a different move order
   /// produces the SAME key. That is what makes transpositions detectable.
-  normFen String @default("")
-  ply     Int    // half-move number: root = 0, 1.e4 = 1, ...e5 = 2
+  normFen String  @default("")
+  ply     Int // half-move number: root = 0, 1.e4 = 1, ...e5 = 2
   comment String? // your own note on this position
   isMain  Boolean @default(false) // the "main line" child is highlighted in the tree
 
@@ -80,6 +80,57 @@ model Opening {
 
 /// Spaced-repetition card attached to a position (Milestone 3).
 /// SM-2 style scheduling: interval grows when you get it right, resets when you don't.
+/// Daily / practice tactics.
+/// `solution` is a space-separated UCI sequence that starts with the solver's
+/// move and alternates sides — exactly the shape Lichess's daily puzzle API
+/// returns, so imported and seeded puzzles behave identically.
+model Puzzle {
+  id        String          @id
+  fen       String // position the solver starts from
+  solution  String // "d1b8 b8d7 d8d7"
+  rating    Int             @default(1200)
+  themes    String          @default("")
+  title     String          @default("")
+  source    String          @default("seed") // "seed" | "lichess-daily"
+  day       String?         @unique // "2026-11-19" for that day's puzzle
+  createdAt DateTime        @default(now())
+  attempts  PuzzleAttempt[]
+}
+
+model PuzzleAttempt {
+  id        String   @id @default(cuid())
+  puzzleId  String
+  solved    Boolean
+  createdAt DateTime @default(now())
+  puzzle    Puzzle   @relation(fields: [puzzleId], references: [id], onDelete: Cascade)
+
+  @@index([createdAt])
+}
+
+/// A curated game or line that ships with the app — the "community" library.
+/// Read-only content plus a comment thread; no accounts, no server.
+model Study {
+  id        String    @id @default(cuid())
+  title     String
+  subtitle  String    @default("")
+  pgn       String
+  eco       String    @default("")
+  createdAt DateTime  @default(now())
+  comments  Comment[]
+}
+
+model Comment {
+  id        String   @id @default(cuid())
+  studyId   String
+  author    String
+  body      String
+  createdAt DateTime @default(now())
+  study     Study    @relation(fields: [studyId], references: [id], onDelete: Cascade)
+
+  @@index([studyId])
+}
+
+/// Spaced repetition card, one per node. Unused until the trainer ships.
 model Review {
   id     String @id @default(cuid())
   nodeId String @unique

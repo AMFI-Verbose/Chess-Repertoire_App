@@ -6,13 +6,34 @@ import { createRepertoire } from "./actions";
 export const dynamic = "force-dynamic";
 
 export default async function DashboardPage() {
-  const [repertoires, openingCount] = await Promise.all([
-    prisma.repertoire.findMany({
-      orderBy: { updatedAt: "desc" },
-      include: { _count: { select: { nodes: true } } },
-    }),
-    prisma.opening.count(),
-  ]);
+  const [repertoires, openingCount, solvedPuzzles, studyCount, recentAttempts] =
+    await Promise.all([
+      prisma.repertoire.findMany({
+        orderBy: { updatedAt: "desc" },
+        include: { _count: { select: { nodes: true } } },
+      }),
+      prisma.opening.count(),
+      prisma.puzzleAttempt.count({ where: { solved: true } }),
+      prisma.study.count(),
+      prisma.puzzleAttempt.findMany({
+        orderBy: { createdAt: "desc" },
+        take: 50,
+        select: { solved: true },
+      }),
+    ]);
+
+  let streak = 0;
+  for (const attempt of recentAttempts) {
+    if (!attempt.solved) break;
+    streak += 1;
+  }
+
+  const stats = [
+    { label: "Repertoires", value: repertoires.length },
+    { label: "Puzzles solved", value: solvedPuzzles },
+    { label: "Solve streak", value: streak },
+    { label: "Community studies", value: studyCount },
+  ];
 
   return (
     <main className="mx-auto max-w-5xl px-6 py-14">
@@ -25,29 +46,71 @@ export default async function DashboardPage() {
         </h1>
         <p className="mt-2 max-w-xl text-sm leading-relaxed text-[var(--muted)]">
           Build the opening lines you actually play, branch them where they
-          diverge, and keep a note on every position. Spaced-repetition drilling
-          comes next.
+          diverge, keep a note on every position — then test them against
+          Stockfish and grade every move in review.
         </p>
       </header>
 
-      <Link
-        href="/openings"
-        className="group mb-10 flex items-center gap-4 rounded-xl border border-[var(--line)] bg-[var(--panel)] px-5 py-4 transition hover:border-[var(--accent)]"
-      >
-        <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-[var(--line)] bg-[#f0d9b5] text-lg text-[#b58863]">
-          ♜
-        </span>
-        <span className="min-w-0 flex-1">
-          <span className="block font-medium">Browse the opening library</span>
-          <span className="mt-0.5 block text-xs text-[var(--muted)]">
-            {openingCount.toLocaleString()} named lines — search by name, ECO code, or
-            moves
+      <div className="mb-8 grid grid-cols-2 gap-3 sm:grid-cols-4">
+        {stats.map((stat) => (
+          <div
+            key={stat.label}
+            className="rounded-xl border border-[var(--line)] bg-[var(--panel)] px-4 py-3"
+          >
+            <p className="text-lg font-semibold tabular-nums">{stat.value}</p>
+            <p className="text-[11px] uppercase tracking-wide text-[var(--muted)]">
+              {stat.label}
+            </p>
+          </div>
+        ))}
+      </div>
+
+      <div className="mb-10 grid gap-3 sm:grid-cols-3">
+        <Link
+          href="/openings"
+          className="group flex items-center gap-4 rounded-xl border border-[var(--line)] bg-[var(--panel)] px-5 py-4 transition hover:border-[var(--accent)]"
+        >
+          <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-[var(--line)] bg-[#f0d9b5] text-lg text-[#b58863]">
+            ♜
           </span>
-        </span>
-        <span className="shrink-0 text-xs text-[var(--muted)] transition group-hover:text-[var(--accent)]">
-          Search →
-        </span>
-      </Link>
+          <span className="min-w-0 flex-1">
+            <span className="block font-medium">Opening library</span>
+            <span className="mt-0.5 block text-xs text-[var(--muted)]">
+              {openingCount.toLocaleString()} named lines, searchable
+            </span>
+          </span>
+        </Link>
+
+        <Link
+          href="/puzzles"
+          className="group flex items-center gap-4 rounded-xl border border-[var(--line)] bg-[var(--panel)] px-5 py-4 transition hover:border-[var(--accent)]"
+        >
+          <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-[var(--line)] bg-[#f0d9b5] text-lg text-[#b58863]">
+            ♛
+          </span>
+          <span className="min-w-0 flex-1">
+            <span className="block font-medium">Daily puzzle</span>
+            <span className="mt-0.5 block text-xs text-[var(--muted)]">
+              Fresh tactic every day, plus practice
+            </span>
+          </span>
+        </Link>
+
+        <Link
+          href="/community"
+          className="group flex items-center gap-4 rounded-xl border border-[var(--line)] bg-[var(--panel)] px-5 py-4 transition hover:border-[var(--accent)]"
+        >
+          <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-[var(--line)] bg-[#f0d9b5] text-lg text-[#b58863]">
+            ♟
+          </span>
+          <span className="min-w-0 flex-1">
+            <span className="block font-medium">Community studies</span>
+            <span className="mt-0.5 block text-xs text-[var(--muted)]">
+              Annotated games with discussion
+            </span>
+          </span>
+        </Link>
+      </div>
 
       <div className="grid gap-8 lg:grid-cols-[minmax(0,1fr)_340px]">
         <section>
