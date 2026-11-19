@@ -18,6 +18,7 @@ import {
   type PgnMove,
 } from "@/lib/chess";
 import type { NodeDTO } from "@/lib/types";
+import { START_RATING, updateRating } from "@/lib/elo";
 
 type DbNode = {
   id: string;
@@ -479,6 +480,11 @@ export type PuzzleStats = {
   solved: number;
   streak: number;
   accuracy: number;
+  /** Elo of the local player, moved by every attempt. */
+  rating: number;
+  peak: number;
+  /** Points gained/lost on the most recent attempt. */
+  lastDelta: number;
 };
 
 type DbPuzzle = {
@@ -508,14 +514,33 @@ function today(): string {
   return new Date().toLocaleDateString("sv-SE");
 }
 
+/** The single local player. Created on first read — no auth, by design. */
+async function ensureProfile() {
+  return prisma.profile.upsert({
+    where: { id: "local" },
+    update: {},
+    create: {
+      id: "local",
+      puzzleRating: START_RATING,
+      peakRating: START_RATING,
+    },
+  });
+}
+
 async function puzzleStats(): Promise<PuzzleStats> {
-  const [attempted, solved, recent] = await Promise.all([
+  const profile = await ensureProfile();
+
+  const [attempted, solved, recent, last] = await Promise.all([
     prisma.puzzleAttempt.count(),
     prisma.puzzleAttempt.count({ where: { solved: true } }),
     prisma.puzzleAttempt.findMany({
       orderBy: { createdAt: "desc" },
       take: 50,
       select: { solved: true },
+    }),
+    prisma.puzzleAttempt.findFirst({
+      orderBy: { createdAt: "desc" },
+      select: { ratingBefore: true, ratingAfter: true },
     }),
   ]);
 
@@ -526,11 +551,19 @@ async function puzzleStats(): Promise<PuzzleStats> {
     streak += 1;
   }
 
+  const lastDelta =
+    last && last.ratingBefore != null && last.ratingAfter != null
+      ? last.ratingAfter - last.ratingBefore
+      : 0;
+
   return {
     attempted,
     solved,
     streak,
     accuracy: attempted > 0 ? Math.round((solved / attempted) * 100) : 0,
+    rating: profile.puzzleRating,
+    peak: profile.peakRating,
+    lastDelta,
   };
 }
 
@@ -689,9 +722,42 @@ export async function submitPuzzleAttempt(input: {
   puzzleId: string;
   solved: boolean;
 }): Promise<PuzzleStats> {
-  await prisma.puzzleAttempt.create({
-    data: { puzzleId: input.puzzleId, solved: Boolean(input.solved) },
+  const puzzle = await prisma.puzzle.findUnique({
+    where: { id: input.puzzleId },
+    select: { rating: true },
   });
+  if (!puzzle) throw new Error("Unknown puzzle");
+
+  const profile = await ensureProfile();
+  const attempts = await prisma.puzzleAttempt.count();
+  const solved = Boolean(input.solved);
+
+  // One puzzle = one match. Rating gap sets the expectancy.
+  const update = updateRating({
+    rating: profile.puzzleRating,
+    puzzleRating: puzzle.rating,
+    solved,
+    attempts,
+  });
+
+  // Snapshot both ends of the move so history can be replayed or graphed.
+  await prisma.puzzleAttempt.create({
+    data: {
+      puzzleId: input.puzzleId,
+      solved,
+      ratingBefore: profile.puzzleRating,
+      ratingAfter: update.rating,
+    },
+  });
+
+  await prisma.profile.update({
+    where: { id: profile.id },
+    data: {
+      puzzleRating: update.rating,
+      peakRating: Math.max(profile.peakRating, update.rating),
+    },
+  });
+
   return puzzleStats();
 }
 

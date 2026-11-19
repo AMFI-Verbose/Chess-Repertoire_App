@@ -98,13 +98,25 @@ model Puzzle {
 }
 
 model PuzzleAttempt {
-  id        String   @id @default(cuid())
-  puzzleId  String
-  solved    Boolean
-  createdAt DateTime @default(now())
-  puzzle    Puzzle   @relation(fields: [puzzleId], references: [id], onDelete: Cascade)
+  id           String   @id @default(cuid())
+  puzzleId     String
+  solved       Boolean
+  // Elo snapshot, so history can be replayed and a rating graph drawn later.
+  ratingBefore Int?
+  ratingAfter  Int?
+  createdAt    DateTime @default(now())
+  puzzle       Puzzle   @relation(fields: [puzzleId], references: [id], onDelete: Cascade)
 
   @@index([createdAt])
+}
+
+/// One local player. There is no auth — this row *is* the current user.
+model Profile {
+  id           String   @id @default("local")
+  name         String   @default("You")
+  puzzleRating Int      @default(1500)
+  peakRating   Int      @default(1500)
+  updatedAt    DateTime @updatedAt
 }
 
 /// A curated game or line that ships with the app — the "community" library.

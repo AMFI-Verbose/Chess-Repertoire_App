@@ -12,6 +12,7 @@ import {
   type PuzzleStats,
 } from "@/app/actions";
 import { DARK_SQUARE, LIGHT_SQUARE, squaresOf, tint } from "@/lib/boardTheme";
+import { expectedScore } from "@/lib/elo";
 import { play } from "@/lib/sound";
 
 type Status = "solving" | "solved" | "failed" | "revealed";
@@ -38,6 +39,7 @@ export default function PuzzleTrainer({
   const [shaking, setShaking] = useState(false);
   const [lastMove, setLastMove] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [delta, setDelta] = useState<number | null>(null);
 
   // A mutable board that mirrors whatever is on screen.
   const board = useRef(new Chess(initial.fen));
@@ -53,6 +55,8 @@ export default function PuzzleTrainer({
       reported.current = true;
       const next = await submitPuzzleAttempt({ puzzleId: puzzle.id, solved });
       setStats(next);
+      setDelta(next.lastDelta);
+      window.setTimeout(() => setDelta(null), 5000);
     },
     [puzzle.id],
   );
@@ -168,6 +172,7 @@ export default function PuzzleTrainer({
       setPuzzle(fresh.puzzle);
       setStats(fresh.stats);
       setDaily(false);
+      setDelta(null);
       setStatus("solving");
       setStep(0);
       setLastMove(null);
@@ -265,7 +270,9 @@ export default function PuzzleTrainer({
                 setLastMove(null);
                 board.current = new Chess(puzzle.fen);
                 setPosition(puzzle.fen);
-                reported.current = false;
+                // Deliberately NOT re-opening the attempt: retrying the
+                // position is practice, but one puzzle may only move your
+                // rating once. A new puzzle resets this flag.
               }}
               className="rounded-lg border border-[var(--line)] px-4 py-2 text-sm text-[var(--muted)] transition hover:border-[var(--accent)] hover:text-[var(--text)]"
             >
@@ -276,6 +283,58 @@ export default function PuzzleTrainer({
       </section>
 
       <aside className="flex flex-col gap-4">
+        <div className="rounded-xl border border-[var(--line)] bg-[var(--panel)] p-5">
+          <div className="flex items-baseline justify-between">
+            <span className="text-[11px] uppercase tracking-[0.16em] text-[var(--muted)]">
+              Your puzzle rating
+            </span>
+            {delta !== null && delta !== 0 && (
+              <span
+                className={`animate-pop rounded px-1.5 py-0.5 text-xs font-semibold ${
+                  delta > 0
+                    ? "bg-[#26c2a3]/15 text-[#26c2a3]"
+                    : "bg-[#ca3431]/15 text-[#ca3431]"
+                }`}
+              >
+                {delta > 0 ? `+${delta}` : delta}
+              </span>
+            )}
+          </div>
+
+          <div className="mt-1 flex items-end gap-2">
+            <span className="text-3xl font-semibold tabular-nums">
+              {stats.rating}
+            </span>
+            <span className="pb-1 text-[11px] text-[var(--muted)]">
+              peak {stats.peak}
+            </span>
+          </div>
+
+          <div className="mt-3">
+            <div className="mb-1 flex justify-between text-[11px] text-[var(--muted)]">
+              <span>vs {puzzle.rating}</span>
+              <span>
+                {Math.round(expectedScore(stats.rating, puzzle.rating) * 100)}%
+                expected
+              </span>
+            </div>
+            <div className="h-1.5 w-full overflow-hidden rounded-full bg-[var(--line)]">
+              <div
+                className="h-full rounded-full bg-[var(--accent)] transition-[width] duration-500"
+                style={{
+                  width: `${Math.round(
+                    expectedScore(stats.rating, puzzle.rating) * 100,
+                  )}%`,
+                }}
+              />
+            </div>
+            <p className="mt-2 text-[11px] leading-relaxed text-[var(--muted)]">
+              Elo updates after every attempt: beating a puzzle rated above you
+              pays more than beating an easy one.
+            </p>
+          </div>
+        </div>
+
         <div className="rounded-xl border border-[var(--line)] bg-[var(--panel)] p-5">
           <div className="mb-3 flex items-center justify-between">
             <span className="text-[11px] uppercase tracking-[0.16em] text-[var(--accent)]">
