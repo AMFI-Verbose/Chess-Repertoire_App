@@ -6,7 +6,7 @@ import { createRepertoire } from "./actions";
 export const dynamic = "force-dynamic";
 
 export default async function DashboardPage() {
-  const [repertoires, openingCount, solvedPuzzles, studyCount, recentAttempts] =
+  const [repertoires, openingCount, solvedPuzzles, studyCount, recentAttempts, profile] =
     await Promise.all([
       prisma.repertoire.findMany({
         orderBy: { updatedAt: "desc" },
@@ -20,6 +20,7 @@ export default async function DashboardPage() {
         take: 50,
         select: { solved: true },
       }),
+      prisma.profile.findUnique({ where: { id: "local" } }),
     ]);
 
   let streak = 0;
@@ -30,10 +31,11 @@ export default async function DashboardPage() {
 
   const stats = [
     { label: "Repertoires", value: repertoires.length },
+    { label: "Puzzle rating", value: profile?.puzzleRating ?? 1500 },
     { label: "Puzzles solved", value: solvedPuzzles },
     { label: "Solve streak", value: streak },
-    { label: "Community studies", value: studyCount },
   ];
+  void studyCount;
 
   return (
     <main className="mx-auto max-w-5xl px-6 py-14">

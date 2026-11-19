@@ -21,7 +21,7 @@ code (`B90`) or move sequence (`1.e4 c5`), each previewable on a board.
 
 | Puzzles | Community |
 |---|---|
-| A fresh tactic every day from Lichess's public API, cached locally so it works offline; a seeded practice set, solve streaks and accuracy stored in SQLite. | Annotated games (Morphy 1858, Anderssen 1851, Légal's trap) with a comment thread on each. Step through with ← / →, post a comment, or copy the whole game into a new repertoire in one click. |
+| A fresh tactic every day from Lichess's public API, cached locally so it works offline; a seeded practice set, and an **Elo rating that moves after every attempt** (K = 40 / 32 / 24). Streak and accuracy stored in SQLite. | Annotated games (Morphy 1858, Anderssen 1851, Légal's trap) with a comment thread on each. Step through with ← / →, post a comment, or copy the whole game into a new repertoire in one click. |
 
 Both are deliberately local-first: there is no server and no account. The
 library ships with the app and the threads live in your own database — seeded
