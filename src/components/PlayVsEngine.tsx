@@ -47,6 +47,8 @@ export default function PlayVsEngine({
   const [evalCp, setEvalCp] = useState<number | null>(null);
   const [savedId, setSavedId] = useState<string | null>(null);
   const [saveError, setSaveError] = useState(false);
+  // A pawn reaching the last rank waits here until you pick a piece.
+  const [promotion, setPromotion] = useState<{ from: string; to: string } | null>(null);
 
   // Clocks are milliseconds remaining, per side. 0 + clockOn = untimed.
   const [whiteMs, setWhiteMs] = useState(0);
@@ -112,6 +114,7 @@ export default function PlayVsEngine({
     setEvalCp(null);
     setSavedId(null);
     setSaveError(false);
+    setPromotion(null);
     pendingRef.current = null;
     setWhiteMs(baseMs);
     setBlackMs(baseMs);
@@ -306,6 +309,25 @@ export default function PlayVsEngine({
       .catch(() => undefined);
   }, [fen, showEval, phase, getEngine]);
 
+  /**
+   * Does this move promote? A pawn moving to rank 1 or 8 must choose a piece —
+   * auto-queening quietly removes underpromotion from the game.
+   */
+  function needsPromotion(from: string, to: string): boolean {
+    const board = new Chess(fen);
+    const piece = board.get(from as never);
+    if (!piece || piece.type !== "p") return false;
+    return to[1] === "8" || to[1] === "1";
+  }
+
+  function attemptMove(from: string, to: string): boolean {
+    if (needsPromotion(from, to)) {
+      setPromotion({ from, to });
+      return true;
+    }
+    return commitMove(from, to);
+  }
+
   function onDrop({
     sourceSquare,
     targetSquare,
@@ -319,7 +341,7 @@ export default function PlayVsEngine({
     if (status !== "playing") return false;
     if (thinking) return false;
     if (turnOf(fen) !== youPlay) return false;
-    return commitMove(sourceSquare, targetSquare);
+    return attemptMove(sourceSquare, targetSquare);
   }
 
   /** chess.com behaviour: click a piece, then click its destination. */
@@ -333,7 +355,7 @@ export default function PlayVsEngine({
     }
 
     if (selected) {
-      const moved = commitMove(selected, square);
+      const moved = attemptMove(selected, square);
       setSelected(null);
       if (moved) return;
     }
@@ -406,34 +428,61 @@ export default function PlayVsEngine({
               ? `vs Stockfish · ${levelInfo.name} (≈${levelInfo.rating}) · ${
                   clockOn ? `${timeControl.label} ${timeControl.category}` : "no clock"
                 }${startFen === START_FEN ? "" : " · custom position"}`
-              : "Create a game — quick pairing, or set every option yourself"}
+              : "New game against Stockfish 19 — pick a level, a clock and a colour, or click a quick pairing to start straight away."}
           </p>
         </div>
         {repertoireId ? <ModeTabs repertoireId={repertoireId} active="play" /> : null}
       </header>
 
       {phase === "setup" ? (
-        <div className="flex justify-center">
+        <div className="mx-auto w-full max-w-2xl">
           <GameSetup onStart={startGame} defaultLevel={4} />
         </div>
       ) : (
         <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_320px]">
-          <section className="flex flex-col items-center gap-3">
+          <section className="relative flex flex-col items-center gap-3">
+            {promotion && (
+              <div className="absolute inset-0 z-20 flex items-center justify-center rounded-xl bg-black/55">
+                <div className="rounded-xl border border-[var(--line)] bg-[var(--panel)] p-4 shadow-xl">
+                  <p className="mb-3 text-center text-xs text-[var(--muted)]">
+                    Promote to
+                  </p>
+                  <div className="flex gap-2">
+                    {(["q", "r", "b", "n"] as const).map((piece) => (
+                      <button
+                        key={piece}
+                        onClick={() => {
+                          const move = promotion;
+                          setPromotion(null);
+                          if (move) commitMove(move.from, move.to, piece);
+                        }}
+                        className="flex h-12 w-12 items-center justify-center rounded-lg border border-[var(--line)] bg-[var(--panel-2)] text-[26px] leading-none transition hover:border-[var(--accent)] hover:bg-[var(--panel)]"
+                        title={{ q: "Queen", r: "Rook", b: "Bishop", n: "Knight" }[piece]}
+                      >
+                        {youPlay === "w"
+                          ? { q: "♕", r: "♖", b: "♗", n: "♘" }[piece]
+                          : { q: "♛", r: "♜", b: "♝", n: "♞" }[piece]}
+                      </button>
+                    ))}
+                  </div>
+                  <button
+                    onClick={() => setPromotion(null)}
+                    className="mt-3 w-full rounded-md border border-[var(--line)] px-2 py-1 text-[11px] text-[var(--muted)]"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </div>
+            )}
+
             {clockOn && (
-              <div className="grid w-full max-w-[600px] grid-cols-2 gap-2">
+              <div className="w-full max-w-[600px]">
                 <ClockCard
                   label="Stockfish"
-                  sub={`L${levelInfo.level}`}
+                  sub={`L${levelInfo.level} · ${timeControl.category}`}
                   value={formatClock(theirMs)}
                   active={status === "playing" && !yourTurn}
                   low={theirMs < 20000}
-                />
-                <ClockCard
-                  label="You"
-                  sub={youPlay === "w" ? "white" : "black"}
-                  value={formatClock(yourMs)}
-                  active={status === "playing" && yourTurn}
-                  low={yourMs < 20000}
                 />
               </div>
             )}
@@ -460,6 +509,18 @@ export default function PlayVsEngine({
                 }}
               />
             </div>
+
+            {clockOn && (
+              <div className="w-full max-w-[600px]">
+                <ClockCard
+                  label="You"
+                  sub={youPlay === "w" ? "white" : "black"}
+                  value={formatClock(yourMs)}
+                  active={status === "playing" && yourTurn}
+                  low={yourMs < 20000}
+                />
+              </div>
+            )}
 
             <p className="text-xs text-[var(--muted)]">
               {result
