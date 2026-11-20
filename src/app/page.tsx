@@ -37,6 +37,8 @@ export default async function DashboardPage() {
           id: true,
           result: true,
           skill: true,
+          level: true,
+          timeControl: true,
           playerColor: true,
           plies: true,
           createdAt: true,
@@ -235,7 +237,7 @@ export default async function DashboardPage() {
                         {game.result === "win" ? "WIN" : game.result === "loss" ? "LOSS" : "DRAW"}
                       </span>
                       <span className="min-w-0 flex-1 truncate text-xs">
-                        vs Stockfish · skill {game.skill} · {game.playerColor} ·{" "}
+                        vs Stockfish · L{game.level} · {game.timeControl} ·{" "}
                         {Math.ceil(game.plies / 2)} moves
                       </span>
                       <span className="shrink-0 text-[11px] text-[var(--muted)]">

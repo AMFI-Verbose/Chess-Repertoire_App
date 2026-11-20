@@ -14,6 +14,7 @@ import {
   type MoveLabel,
 } from "@/lib/classify";
 import { saveGameAnalysis } from "@/app/actions";
+import { START_FEN } from "@/lib/chess";
 import {
   DARK_SQUARE,
   LIGHT_SQUARE,
@@ -61,6 +62,7 @@ export default function ReviewSequence({
   bookPlies = [],
   gameId,
   extra = null,
+  startFen = START_FEN,
 }: {
   moves: ReviewMove[];
   orientation: "white" | "black";
@@ -74,6 +76,8 @@ export default function ReviewSequence({
   gameId?: string;
   /** Extra cards for the sidebar (PGN export, result badge, …). */
   extra?: ReactNode;
+  /** Position the game began in — a game can start from a custom FEN. */
+  startFen?: string;
 }) {
   const [grades, setGrades] = useState<(MoveLabel | null)[]>([]);
   const [summary, setSummary] = useState<ReviewSummary | null>(null);
@@ -87,8 +91,8 @@ export default function ReviewSequence({
 
   // Position 0 is the start; position i+1 is after move i.
   const positions = useMemo(
-    () => [startFenOf(), ...moves.map((m) => m.fen)],
-    [moves],
+    () => [startFen, ...moves.map((m) => m.fen)],
+    [moves, startFen],
   );
 
   // ---- analysis ----------------------------------------------------------
@@ -502,12 +506,6 @@ function MoveChip({
 function mean(values: number[]): number {
   if (values.length === 0) return 0;
   return values.reduce((total, value) => total + value, 0) / values.length;
-}
-
-function startFenOf(): string {
-  // The position before the first move: replay backwards is impossible, but the
-  // starting position is the only case this component ever reviews from.
-  return "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
 }
 
 function groupMoves(moves: ReviewMove[]) {
