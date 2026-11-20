@@ -2,7 +2,7 @@ import Link from "next/link";
 
 import { prisma } from "@/lib/prisma";
 import { deleteGame } from "@/app/actions";
-import { levelByNumber } from "@/lib/gameOptions";
+import { botById } from "@/lib/bots";
 
 export const dynamic = "force-dynamic";
 
@@ -62,7 +62,7 @@ export default async function GamesPage() {
           </p>
           <h1 className="text-2xl font-semibold tracking-tight">Your games</h1>
           <p className="mt-1 max-w-xl text-sm text-[var(--muted)]">
-            Every finished game against Stockfish is stored here as a PGN, so it can
+            Every finished game against one of the characters is stored here as a PGN, so it can
             be replayed, graded move by move, and exported.
           </p>
         </div>
@@ -92,7 +92,7 @@ export default async function GamesPage() {
             href="/play"
             className="mt-4 inline-block rounded-lg bg-[var(--accent)] px-3 py-2 text-xs font-medium text-[#0b1602]"
           >
-            Play Stockfish
+            Play a character
           </Link>
         </div>
       ) : (
@@ -131,7 +131,7 @@ export default async function GamesPage() {
                     href={`/games/${game.id}`}
                     className="block truncate text-sm font-medium hover:text-[var(--accent)]"
                   >
-                    vs Stockfish · {levelByNumber(game.level).name}
+                    vs {botById(game.botId).name} · ≈{botById(game.botId).rating}
                   </Link>
                   <span className="mt-0.5 block text-[11px] text-[var(--muted)]">
                     {game.playerColor === "white" ? "White" : "Black"} ·{" "}

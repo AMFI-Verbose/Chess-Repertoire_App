@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { prisma } from "@/lib/prisma";
 import { createRepertoire } from "./actions";
+import { botById } from "@/lib/bots";
 
 // Read from the database on every request — never serve a stale cached page.
 export const dynamic = "force-dynamic";
@@ -36,6 +37,7 @@ export default async function DashboardPage() {
         select: {
           id: true,
           result: true,
+          botId: true,
           skill: true,
           level: true,
           timeControl: true,
@@ -56,7 +58,7 @@ export default async function DashboardPage() {
     { label: "Repertoires", value: repertoires.length },
     { label: "Puzzle rating", value: profile?.puzzleRating ?? 1500 },
     { label: "Puzzles solved", value: solvedPuzzles },
-    { label: "Games vs engine", value: gameCount },
+    { label: "Games played", value: gameCount },
   ];
   void studyCount;
 
@@ -79,7 +81,7 @@ export default async function DashboardPage() {
             href="/play"
             className="rounded-lg bg-[var(--accent)] px-4 py-2 text-sm font-semibold text-[#0b1602] transition hover:brightness-110"
           >
-            Play Stockfish →
+            Play a character →
           </Link>
           <Link
             href="/games"
@@ -148,7 +150,7 @@ export default async function DashboardPage() {
             <span className="block font-medium">Your games</span>
             <span className="mt-0.5 block text-xs text-[var(--muted)]">
               {gameCount === 0
-                ? "Play Stockfish — every game is saved"
+                ? "Pick from eight characters — every game is saved"
                 : `${gameCount} saved · replay & grade`}
             </span>
           </span>
@@ -252,7 +254,7 @@ export default async function DashboardPage() {
                         {game.result === "win" ? "WIN" : game.result === "loss" ? "LOSS" : "DRAW"}
                       </span>
                       <span className="min-w-0 flex-1 truncate text-xs">
-                        vs Stockfish · L{game.level} · {game.timeControl} ·{" "}
+                        vs {botById(game.botId).name} · {game.timeControl} ·{" "}
                         {Math.ceil(game.plies / 2)}{" "}
                         {Math.ceil(game.plies / 2) === 1 ? "move" : "moves"}
                       </span>

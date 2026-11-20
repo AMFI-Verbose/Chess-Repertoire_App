@@ -123,6 +123,7 @@ model Game {
   resultText  String   @default("") // "You won by checkmate"
   skill       Int      @default(12) // engine Skill Level, i.e. opponent strength
   level       Int      @default(4) // the named level you picked (1–8)
+  botId       String? // which character you played, when it was one
   timeControl String   @default("unlimited") // "5+3", or "unlimited"
   startFen    String   @default("") // non-standard start position, else empty
   pgn         String
