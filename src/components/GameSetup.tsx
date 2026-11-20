@@ -4,15 +4,15 @@ import { useState } from "react";
 import { Chess } from "chess.js";
 
 import {
-  ENGINE_LEVELS,
   TIME_CONTROLS,
-  levelByNumber,
   timeControlById,
   type GameMode,
 } from "@/lib/gameOptions";
+import { BOTS, DEFAULT_BOT, botById } from "@/lib/bots";
 
 export type StartConfig = {
   level: number;
+  botId: string;
   tcId: string;
   colour: "white" | "black" | "random";
   mode: GameMode;
@@ -29,19 +29,20 @@ export default function GameSetup({
   onStart: (config: StartConfig) => void;
   defaultLevel?: number;
 }) {
-  const [level, setLevel] = useState(defaultLevel);
+  const [botId, setBotId] = useState(DEFAULT_BOT.id);
   const [tcId, setTcId] = useState("5+3");
   const [colour, setColour] = useState<StartConfig["colour"]>("white");
   const [mode, setMode] = useState<GameMode>("standard");
   const [fenInput, setFenInput] = useState("");
   const [error, setError] = useState<string | null>(null);
 
-  const levelInfo = levelByNumber(level);
+  const bot = botById(botId);
   const control = timeControlById(tcId);
 
   function start(overrides?: Partial<StartConfig>) {
     const config: StartConfig = {
-      level,
+      level: bot.level,
+      botId: bot.id,
       tcId,
       colour,
       mode,
@@ -99,8 +100,8 @@ export default function GameSetup({
           })}
         </div>
         <p className="mt-2 text-[11px] text-[var(--muted)]">
-          Starts instantly as Club (L4, ≈1600) with a random colour. Want a
-          different opponent or clock? Use the form below.
+          Starts instantly against {bot.name} (≈{bot.rating}) with a random colour.
+          Pick a different character or clock in the form below.
         </p>
       </section>
 
@@ -109,7 +110,7 @@ export default function GameSetup({
         <div className="border-b border-[var(--line)] px-5 py-3">
           <h2 className="text-sm font-medium">New game</h2>
           <p className="mt-0.5 text-[11px] text-[var(--muted)]">
-            {levelInfo.name} · {levelInfo.rating} Elo ·{" "}
+            {bot.name} · ≈{bot.rating} · {bot.style} ·{" "}
             {control.initial === null ? "no clock" : `${control.label} ${control.category}`} ·{" "}
             {colour === "random" ? "random colour" : colour}
             {mode === "custom" ? " · from a position" : ""}
@@ -119,23 +120,35 @@ export default function GameSetup({
         <div className="flex flex-col gap-5 px-5 py-4">
           <Row label="Opponent">
             <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
-              {ENGINE_LEVELS.map((entry) => {
-                const active = entry.level === level;
+              {BOTS.map((entry) => {
+                const active = entry.id === botId;
                 return (
                   <button
-                    key={entry.level}
-                    onClick={() => setLevel(entry.level)}
-                    className="rounded-lg border px-2.5 py-2 text-left transition"
+                    key={entry.id}
+                    onClick={() => setBotId(entry.id)}
+                    className="flex flex-col items-center gap-1 rounded-lg border px-1.5 py-2 transition"
                     style={{
                       borderColor: active ? "var(--accent)" : "var(--line)",
                       background: active ? "var(--panel-2)" : "transparent",
                     }}
+                    title={`${entry.title} — ${entry.blurb}`}
                   >
-                    <span className="block text-xs font-medium">
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img
+                      src={entry.avatar}
+                      alt={entry.name}
+                      className="h-11 w-11 rounded-full object-cover"
+                      style={{
+                        boxShadow: active
+                          ? `0 0 0 2px ${entry.accent}`
+                          : "0 0 0 1px var(--line)",
+                      }}
+                    />
+                    <span className="w-full truncate text-center text-[11px] font-medium">
                       {entry.name}
                     </span>
-                    <span className="mt-0.5 block font-mono text-[10px] text-[var(--muted)]">
-                      L{entry.level} · {entry.rating}
+                    <span className="w-full truncate text-center font-mono text-[10px] text-[var(--muted)]">
+                      ≈{entry.rating}
                     </span>
                   </button>
                 );

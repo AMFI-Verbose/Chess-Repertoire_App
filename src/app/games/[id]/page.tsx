@@ -4,7 +4,7 @@ import { prisma } from "@/lib/prisma";
 import ReviewSequence, { type ReviewMove } from "@/components/ReviewSequence";
 import CopyPgn from "@/components/CopyPgn";
 import { START_FEN, normalizedFen, parsePgnGame } from "@/lib/chess";
-import { levelByNumber } from "@/lib/gameOptions";
+import { botById } from "@/lib/bots";
 
 export const dynamic = "force-dynamic";
 
@@ -54,9 +54,7 @@ export default async function GamePage({
     <ReviewSequence
       moves={moves}
       orientation={game.playerColor === "black" ? "black" : "white"}
-      title={`vs Stockfish · ${levelByNumber(game.level).name} (≈${
-        levelByNumber(game.level).rating
-      })`}
+      title={`vs ${botById(game.botId).name} (≈${botById(game.botId).rating})`}
       subtitle={`${game.resultText} · ${
         game.timeControl === "unlimited" ? "no clock" : game.timeControl
       } · ${new Intl.DateTimeFormat("en-GB", {
@@ -69,6 +67,7 @@ export default async function GamePage({
       bookPlies={bookPlies}
       startFen={game.startFen || START_FEN}
       initialPly={initialPly}
+      storedAnalysis={game.analysis}
       extra={
         <div className="flex flex-col gap-2">
           <div

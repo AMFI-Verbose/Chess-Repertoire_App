@@ -17,7 +17,24 @@ Next.js 15 · TypeScript · Tailwind 4 · Prisma 6 · SQLite · chess.js · reac
 Plus a searchable **opening library**: 3,865 ECO lines, searchable by name,
 code (`B90`) or move sequence (`1.e4 c5`), each previewable on a board.
 
-### Playing the engine
+### The characters
+
+Eight opponents, each a real Stockfish wearing a handicap: how long it thinks, how wide it looks, and how often it settles for one of its other candidate moves. Skill Level 0 alone still beats beginners, so the low levels lean on that last dial.
+
+| Character | Rating | Style |
+| --- | --- | --- |
+| Pip | ≈450 | Absolute beginner — hangs pieces, loves pawn moves |
+| Bella | ≈750 | Eager improver |
+| Rusty | ≈1000 | Gambit addict |
+| Marlow | ≈1350 | Quiet positional |
+| Kestrel | ≈1650 | Tactical hawk |
+| Sable | ≈1950 | Cold calculator |
+| Vex | ≈2200 | Chaos agent |
+| Titan | ≈2600 | Full strength, no handicap |
+
+Each has a portrait, a personality, and a chat panel during the game: they greet you, react to captures, checks and promotions, comment when the game ends, and answer a few things you type back.
+
+## Playing the engine
 
 Start a game in one of three ways on **Play**: click a quick-pairing tile (1+0 … 10+0 or untimed) to begin immediately at Club level with a random colour; or set the opponent level, the clock, your colour and the starting position in the *New game* card and press **Start game**. Any repertoire's Play tab starts the same way. Pawns that reach the last rank open a promotion picker instead of silently becoming a queen.
 

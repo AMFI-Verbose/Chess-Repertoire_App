@@ -26,6 +26,28 @@ import { play, type SoundName } from "@/lib/sound";
 
 export type ReviewMove = { san: string; uci: string; fen: string; ply: number };
 
+/** Bump when grading rules change: old stored reviews then re-run. */
+const ANALYSIS_VERSION = 3;
+
+/** Sum of knights, bishops, rooks and queens still on the board. */
+function nonPawnMaterial(fen: string): number {
+  try {
+    const pieces = new Chess(fen).board();
+    const values: Record<string, number> = { n: 3, b: 3, r: 5, q: 9, k: 0, p: 0 };
+    return pieces.reduce(
+      (total, row) =>
+        total +
+        row.reduce(
+          (sum, piece) => sum + (piece ? values[piece.type] ?? 0 : 0),
+          0,
+        ),
+      0,
+    );
+  } catch {
+    return 99;
+  }
+}
+
 const SOUND_FOR_LABEL: Record<MoveLabel, SoundName | null> = {
   brilliant: "brilliant",
   great: "great",
@@ -41,9 +63,17 @@ const SOUND_FOR_LABEL: Record<MoveLabel, SoundName | null> = {
 /** Only the loud verdicts get a floating banner. */
 const FLASHES: MoveLabel[] = ["brilliant", "great", "inaccuracy", "mistake", "blunder"];
 
+export type PhaseScore = { accuracy: number; moves: number };
+
 export type ReviewSummary = {
   accuracyWhite: number;
   accuracyBlack: number;
+  /** Accuracy split into the three stages every review site reports. */
+  phases: {
+    opening: PhaseScore;
+    middlegame: PhaseScore;
+    endgame: PhaseScore;
+  };
   acplWhite: number;
   acplBlack: number;
   /** How many moves per colour actually had an eval (book moves do not). */
@@ -65,6 +95,7 @@ export default function ReviewSequence({
   extra = null,
   startFen = START_FEN,
   initialPly = 0,
+  storedAnalysis = null,
 }: {
   moves: ReviewMove[];
   orientation: "white" | "black";
@@ -82,6 +113,8 @@ export default function ReviewSequence({
   startFen?: string;
   /** Deep link: ?ply=6 opens the review already on the sixth move. */
   initialPly?: number;
+  /** The JSON written back after a previous pass — reloads instantly. */
+  storedAnalysis?: string | null;
 }) {
   const [grades, setGrades] = useState<(MoveLabel | null)[]>([]);
   const [summary, setSummary] = useState<ReviewSummary | null>(null);
@@ -104,39 +137,70 @@ export default function ReviewSequence({
   );
 
   // ---- analysis ----------------------------------------------------------
+  // A review that was already computed is restored verbatim: same grades,
+  // same graph, no engine warm-up. Chess.com does the same thing server-side;
+  // here the JSON lives in the game row.
+  const hydrated = useRef(false);
   useEffect(() => {
+    if (!storedAnalysis) return;
+    try {
+      const parsed = JSON.parse(storedAnalysis) as {
+        version?: number;
+        plies?: number;
+        grades?: (MoveLabel | null)[];
+        bestUci?: (string | null)[];
+        evals?: number[];
+        summary?: ReviewSummary;
+      };
+      if (parsed.version !== ANALYSIS_VERSION) return;
+      if ((parsed.plies ?? -1) !== moves.length) return;
+      if (!parsed.grades || !parsed.evals || !parsed.summary) return;
+      hydrated.current = true;
+      setGrades(parsed.grades);
+      setBestUci(parsed.bestUci ?? []);
+      setEvals(parsed.evals);
+      setSummary(parsed.summary);
+      setProgress(positions.length);
+      setAnalysing(false);
+    } catch {
+      // A corrupt blob simply means we analyse the game again.
+    }
+  }, [storedAnalysis, moves.length, positions.length]);
+
+  useEffect(() => {
+    if (hydrated.current) return;
     if (moves.length === 0) {
       setAnalysing(false);
       return;
     }
 
-    const engine = new Engine();
-    engineRef.current = engine;
+    // Two workers split the positions between them: the same 600 ms search,
+    // half the wall-clock time. This is the depth the review grades from.
+    const engines = [new Engine(), new Engine()];
+    engineRef.current = engines[0];
     let cancelled = false;
 
     (async () => {
-      const results: EngineResult[] = [];
+      const results: EngineResult[] = new Array(positions.length);
+      let done = 0;
 
-      // One MultiPV=2 search per position, not per move: the score *after* a
-      // move is the score *before* the next one, so N moves cost N searches.
-      for (let index = 0; index < positions.length; index += 1) {
-        if (cancelled) return;
-        const result = await engine.search(positions[index], {
-          // 400ms, not 300: at 300 the eval noise near a label boundary (say a
-          // 120cp loss against a 125cp threshold) flipped the grade between
-          // two reviews of the same game.
-          movetime: 400,
-          multiPv: 2,
-          skill: 20,
-        });
-        results.push(result);
-        setProgress(index + 1);
-      }
+      const work = async (which: 0 | 1) => {
+        for (let index = which; index < positions.length; index += 2) {
+          if (cancelled) return;
+          results[index] = await engines[which].search(positions[index], {
+            movetime: 600,
+            multiPv: 2,
+            skill: 20,
+          });
+          done += 1;
+          if (!cancelled) setProgress(done);
+        }
+      };
 
+      await Promise.all([work(0), work(1)]);
       if (cancelled) return;
 
       // White's point of view after every position, powering the eval graph.
-      // Stockfish reports from the side to move, so flip where black moved.
       const startTurn = new Chess(startFen).turn();
       const evalsWhite: number[] = [];
       for (let index = 0; index < positions.length; index += 1) {
@@ -152,6 +216,16 @@ export default function ReviewSequence({
       const counts: Record<string, number> = {};
       const losses: { w: number[]; b: number[] } = { w: [], b: [] };
       const accuracies: { w: number[]; b: number[] } = { w: [], b: [] };
+      const phaseScores: Record<"opening" | "middlegame" | "endgame", number[]> = {
+        opening: [],
+        middlegame: [],
+        endgame: [],
+      };
+
+      // "Opening" lasts as long as the game followed the ECO table, never less
+      // than four full moves; "endgame" starts when the heavy pieces are gone.
+      const lastBook = bookPlies.length ? Math.max(...bookPlies) : 0;
+      const openingEnd = Math.max(8, lastBook);
 
       for (let index = 0; index < moves.length; index += 1) {
         const move = moves[index];
@@ -205,13 +279,27 @@ export default function ReviewSequence({
         bestUcis.push(bestUci);
         counts[label] = (counts[label] ?? 0) + 1;
 
+        const phase: "opening" | "middlegame" | "endgame" =
+          move.ply <= openingEnd
+            ? "opening"
+            : nonPawnMaterial(move.fen) <= 14
+              ? "endgame"
+              : "middlegame";
+
         // Accuracy needs both ends of the move; book moves have no evaluative
         // score, so they are excluded rather than counted as perfect.
         if (label !== "book" && best !== null && played !== null) {
           losses[mover].push(Math.max(0, best - played));
-          accuracies[mover].push(moveAccuracy(winPercent(best), winPercent(played)));
+          const moveScore = moveAccuracy(winPercent(best), winPercent(played));
+          accuracies[mover].push(moveScore);
+          phaseScores[phase].push(moveScore);
         }
       }
+
+      const phaseOf = (values: number[]) => ({
+        accuracy: mean(values),
+        moves: values.length,
+      });
 
       const verdict: ReviewSummary = {
         accuracyWhite: mean(accuracies.w),
@@ -221,6 +309,11 @@ export default function ReviewSequence({
         ratedWhite: losses.w.length,
         ratedBlack: losses.b.length,
         labels: counts,
+        phases: {
+          opening: phaseOf(phaseScores.opening),
+          middlegame: phaseOf(phaseScores.middlegame),
+          endgame: phaseOf(phaseScores.endgame),
+        },
       };
 
       if (cancelled) return;
@@ -233,18 +326,26 @@ export default function ReviewSequence({
       if (gameId) {
         // Fire-and-forget: the board is already usable, and a failed write must
         // not interrupt studying the game.
-        saveGameAnalysis({ gameId, analysis: JSON.stringify(verdict) }).catch(
-          () => undefined,
-        );
+        saveGameAnalysis({
+          gameId,
+          analysis: JSON.stringify({
+            version: ANALYSIS_VERSION,
+            plies: moves.length,
+            grades: graded,
+            bestUci: bestUcis,
+            evals: evalsWhite,
+            summary: verdict,
+          }),
+        }).catch(() => undefined);
       }
     })();
 
     return () => {
       cancelled = true;
-      engine.terminate();
+      engines.forEach((engine) => engine.terminate());
       engineRef.current = null;
     };
-  }, [moves, positions, bookPlies, gameId]);
+  }, [moves, positions, bookPlies, gameId, storedAnalysis]);
 
   // ---- effects when you land on a move ------------------------------------
   const goTo = useCallback(
@@ -358,7 +459,7 @@ export default function ReviewSequence({
               />
             </div>
 
-            {at > 0 && style && badgeSquare && (
+            {at > 0 && style && style.glyph && badgeSquare && (
               <div
                 className="pointer-events-none absolute z-10"
                 style={{
@@ -373,7 +474,7 @@ export default function ReviewSequence({
                   className="rounded-[4px] px-1 text-[11px] font-bold leading-[15px] shadow"
                   style={{ background: style.color, color: style.text }}
                 >
-                  {style.glyph || "•"}
+                  {style.glyph}
                 </span>
               </div>
             )}
@@ -517,6 +618,19 @@ export default function ReviewSequence({
                   </span>
                 </>
               )}
+              {(["opening", "middlegame", "endgame"] as const).map((phase) => {
+                const score = summary.phases?.[phase];
+                if (!score || score.moves === 0) return null;
+                return (
+                  <span key={phase} className="capitalize">
+                    {phase}{" "}
+                    <strong className="text-[var(--text)]">
+                      {score.accuracy.toFixed(1)}%
+                    </strong>{" "}
+                    <span className="text-[10px]">({score.moves})</span>
+                  </span>
+                );
+              })}
             </div>
           )}
         </section>
@@ -563,7 +677,7 @@ export default function ReviewSequence({
           </div>
 
           <p className="px-1 text-[10px] uppercase tracking-wider text-[var(--muted)]">
-            Stockfish 19 · 400 ms per position · MultiPV 2
+            Stockfish 19 · 600 ms per position · 2 workers · MultiPV 2
           </p>
 
           <p className="px-1 text-[11px] leading-relaxed text-[var(--muted)]">

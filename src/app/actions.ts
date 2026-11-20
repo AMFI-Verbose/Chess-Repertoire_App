@@ -979,6 +979,8 @@ export type SaveGameInput = {
   playerColor: "white" | "black";
   skill: number;
   level: number;
+  /** Which character it was, when the opponent was one of the roster. */
+  botId?: string | null;
   timeControl: string;
   startFen: string;
   result: "win" | "loss" | "draw";
@@ -1047,6 +1049,7 @@ export async function saveEngineGame(input: SaveGameInput): Promise<{ id: string
     data: {
       kind: "engine",
       playerColor: input.playerColor,
+      botId: input.botId ?? null,
       level: Math.max(1, Math.min(8, Math.round(input.level))),
       timeControl: input.timeControl.slice(0, 12),
       startFen: input.startFen.slice(0, 200),
@@ -1077,7 +1080,7 @@ export async function saveGameAnalysis(input: {
 
   await prisma.game.update({
     where: { id: input.gameId },
-    data: { analysis: input.analysis.slice(0, 4000) },
+    data: { analysis: input.analysis.slice(0, 200000) },
   });
 
   revalidatePath("/games");

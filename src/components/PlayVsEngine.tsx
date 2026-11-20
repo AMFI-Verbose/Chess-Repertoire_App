@@ -13,7 +13,10 @@ import { START_FEN, tryMove, turnOf } from "@/lib/chess";
 import { DARK_SQUARE, LIGHT_SQUARE } from "@/lib/boardTheme";
 import { hintStyles } from "@/lib/boardHints";
 import { play } from "@/lib/sound";
-import { formatClock, levelByNumber, timeControlById } from "@/lib/gameOptions";
+import { formatClock, timeControlById } from "@/lib/gameOptions";
+import { DEFAULT_BOT, botById, chooseBotMove } from "@/lib/bots";
+import { botChatLine, botReply, type ChatEvent } from "@/lib/botChat";
+import BotChat, { type ChatMessage } from "@/components/BotChat";
 
 type Status = "playing" | "ended";
 type Phase = "setup" | "game";
@@ -31,7 +34,7 @@ export default function PlayVsEngine({
   const [phase, setPhase] = useState<Phase>("setup");
 
   // --- what was chosen in the setup panel ---
-  const [level, setLevel] = useState(4);
+  const [botId, setBotId] = useState(DEFAULT_BOT.id);
   const [tcId, setTcId] = useState("5+3");
   const [youPlay, setYouPlay] = useState<"w" | "b">(side === "black" ? "b" : "w");
   const [startFen, setStartFen] = useState(START_FEN);
@@ -50,6 +53,12 @@ export default function PlayVsEngine({
   // A pawn reaching the last rank waits here until you pick a piece.
   const [promotion, setPromotion] = useState<{ from: string; to: string } | null>(null);
   const [resultDismissed, setResultDismissed] = useState(false);
+  const [chat, setChat] = useState<ChatMessage[]>([]);
+  // Bumped by every new game so the greeting fires once per game, not once per
+  // empty move list (the engine can move before the greeting timer runs).
+  const [gameSeq, setGameSeq] = useState(0);
+  const chatId = useRef(0);
+  const lastSpokeAt = useRef(-99);
 
   // Clocks are milliseconds remaining, per side. 0 + clockOn = untimed.
   const [whiteMs, setWhiteMs] = useState(0);
@@ -72,7 +81,7 @@ export default function PlayVsEngine({
 
   statusRef.current = status;
 
-  const levelInfo = levelByNumber(level);
+  const bot = botById(botId);
   const timeControl = timeControlById(tcId);
   const clockOn = timeControl.initial !== null;
 
@@ -102,7 +111,7 @@ export default function PlayVsEngine({
     const control = timeControlById(config.tcId);
     const baseMs = control.initial === null ? 0 : control.initial * 1000;
 
-    setLevel(config.level);
+    setBotId(config.botId);
     setTcId(config.tcId);
     setYouPlay(resolved);
     setStartFen(start);
@@ -117,6 +126,9 @@ export default function PlayVsEngine({
     setSaveError(false);
     setPromotion(null);
     setResultDismissed(false);
+    setChat([]);
+    setGameSeq((value) => value + 1);
+    lastSpokeAt.current = -99;
     pendingRef.current = null;
     setWhiteMs(baseMs);
     setBlackMs(baseMs);
@@ -126,6 +138,67 @@ export default function PlayVsEngine({
     tickRef.current = Date.now();
     setPhase("game");
   }, []);
+
+  /** Append a line to the chat log, from either side. */
+  const pushChat = useCallback((from: "bot" | "you", text: string) => {
+    chatId.current += 1;
+    setChat((previous) => [
+      ...previous.slice(-40),
+      { id: chatId.current, from, text },
+    ]);
+  }, []);
+
+  /**
+   * Let the character react to something that just happened. Quiet moves are
+   * ignored and reactions are spaced out, so the chat reads like a person
+   * watching the game rather than a move-by-move commentator.
+   */
+  const speak = useCallback(
+    (event: ChatEvent, force = false, detail?: string) => {
+      if (!force && moves.length - lastSpokeAt.current < 4) return;
+      const line = botChatLine(bot, event, { detail });
+      if (!line) return;
+      lastSpokeAt.current = moves.length;
+      // A beat of "thinking" makes it feel typed rather than triggered.
+      setTimeout(() => pushChat("bot", line), 700);
+    },
+    [bot, moves.length, pushChat],
+  );
+
+  // A new game opens with the character saying hello.
+  useEffect(() => {
+    if (phase !== "game") return;
+    const line = botChatLine(bot, "start");
+    if (!line) return;
+    const timer = setTimeout(() => pushChat("bot", line), 700);
+    return () => clearTimeout(timer);
+  }, [phase, gameSeq, bot, pushChat]);
+
+  /** What the finished result means for this character. */
+  const endEvent = useCallback((text: string | null): ChatEvent => {
+    if (!text) return "draw";
+    if (text.includes("Draw")) return "draw";
+    if (text.includes("You resigned") || text.includes("You ran out of time")) {
+      return "you-lose";
+    }
+    if (text.includes("Stockfish won")) return "you-lose";
+    return "you-win";
+  }, []);
+
+  useEffect(() => {
+    if (status !== "ended" || !result) return;
+    speak(endEvent(result), true);
+  }, [status, result, speak, endEvent]);
+
+  /** You type, they answer a moment later. */
+  const sendChat = useCallback(
+    (text: string) => {
+      pushChat("you", text);
+      const reply = botReply(bot, text);
+      setTimeout(() => pushChat("bot", reply), 850);
+    },
+    [bot, pushChat],
+  );
 
   /** Write the finished game to the database — exactly once per game. */
   const persist = useCallback(
@@ -143,8 +216,9 @@ export default function PlayVsEngine({
       setSaveError(false);
       saveEngineGame({
         playerColor: youPlay === "w" ? "white" : "black",
-        skill: levelInfo.skill,
-        level: levelInfo.level,
+        skill: bot.play.skill,
+        level: bot.level,
+        botId: bot.id,
         timeControl: clockOn ? tcId : "unlimited",
         startFen: startFen === START_FEN ? "" : startFen,
         result: outcome,
@@ -163,7 +237,7 @@ export default function PlayVsEngine({
           setSaveError(true);
         });
     },
-    [youPlay, levelInfo.skill, levelInfo.level, tcId, clockOn, startFen],
+    [youPlay, bot.play.skill, bot.level, bot.id, tcId, clockOn, startFen],
   );
 
   const retrySave = useCallback(() => {
@@ -184,6 +258,16 @@ export default function PlayVsEngine({
       setFen(result.fen);
       setMoves(nextMoves);
       play(result.captured ? "capture" : result.check ? "check" : "move");
+
+      // The characters only comment on things worth commenting on.
+      const moverIsYou = turnOf(current) === youPlay;
+      if (promotion && moverIsYou) {
+        speak("you-promoted");
+      } else if (result.captured) {
+        speak(moverIsYou ? "you-captured" : "i-captured");
+      } else if (result.check) {
+        speak(moverIsYou ? "you-checked" : "i-checked");
+      }
 
       // Increment goes to the side that just moved, and only after the move —
       // the same order a real clock uses.
@@ -218,7 +302,7 @@ export default function PlayVsEngine({
       }
       return true;
     },
-    [fen, moves, persist, youPlay, clockOn, timeControl.increment],
+    [fen, moves, persist, youPlay, clockOn, timeControl.increment, speak],
   );
 
   // ---- the engine's turn -------------------------------------------------
@@ -233,11 +317,9 @@ export default function PlayVsEngine({
 
     let cancelled = false;
 
-    getEngine()
-      .search(fen, { movetime: levelInfo.movetime, skill: levelInfo.skill })
-      .then((response) => {
+    chooseBotMove(getEngine(), fen, bot)
+      .then((uci) => {
         if (cancelled || statusRef.current !== "playing") return;
-        const uci = response.bestmove;
         if (!uci || uci.startsWith("(")) {
           setStatus("ended");
           setResult("Stockfish resigned");
@@ -254,7 +336,7 @@ export default function PlayVsEngine({
     return () => {
       cancelled = true;
     };
-  }, [phase, fen, youPlay, status, levelInfo, commitMove, getEngine, moves, persist]);
+  }, [phase, fen, youPlay, status, bot, commitMove, getEngine, moves, persist]);
 
   // ---- clock -------------------------------------------------------------
   useEffect(() => {
@@ -427,10 +509,10 @@ export default function PlayVsEngine({
           </h1>
           <p className="text-sm text-[var(--muted)]">
             {phase === "game"
-              ? `vs Stockfish · ${levelInfo.name} (≈${levelInfo.rating}) · ${
+              ? `vs ${bot.name} (≈${bot.rating}) · ${
                   clockOn ? `${timeControl.label} ${timeControl.category}` : "no clock"
                 }${startFen === START_FEN ? "" : " · custom position"}`
-              : "New game against Stockfish 19 — pick a level, a clock and a colour, or click a quick pairing to start straight away."}
+              : "Pick an opponent, a clock and a colour — or click a quick pairing to start against Marlow straight away."}
           </p>
         </div>
         {repertoireId ? <ModeTabs repertoireId={repertoireId} active="play" /> : null}
@@ -459,7 +541,7 @@ export default function PlayVsEngine({
                   <p className="mt-1 text-xl font-semibold">{result ?? "Game over"}</p>
                   <p className="mt-1 text-xs text-[var(--muted)]">
                     {moves.length} {moves.length === 1 ? "move" : "moves"} ·
-                    Stockfish {levelInfo.name}
+                    {bot.name}
                     {clockOn ? ` · ${timeControl.label}` : ""}
                   </p>
                   <div className="mt-4 flex flex-col gap-2">
@@ -538,8 +620,10 @@ export default function PlayVsEngine({
             {clockOn && (
               <div className="w-full max-w-[600px]">
                 <ClockCard
-                  label="Stockfish"
-                  sub={`L${levelInfo.level} · ${timeControl.category}`}
+                  label={bot.name}
+                  avatar={bot.avatar}
+                  accent={bot.accent}
+                  sub={`≈${bot.rating} · ${timeControl.category}`}
                   value={formatClock(theirMs)}
                   active={status === "playing" && !yourTurn}
                   low={theirMs < 20000}
@@ -594,6 +678,8 @@ export default function PlayVsEngine({
           </section>
 
           <aside className="flex flex-col gap-4">
+            <BotChat bot={bot} messages={chat} onSend={sendChat} />
+
             <div className="rounded-xl border border-[var(--line)] bg-[var(--panel)] p-4">
               <div className="flex items-center justify-between text-xs text-[var(--muted)]">
                 <span>Evaluation</span>
@@ -623,11 +709,11 @@ export default function PlayVsEngine({
                 Game
               </p>
               <p className="mt-1 text-sm font-medium">
-                Stockfish · {levelInfo.name}
+                {bot.name} · {bot.style}
               </p>
               <p className="mt-0.5 text-xs text-[var(--muted)]">
                 {clockOn ? `${timeControl.label} ${timeControl.category}` : "No clock"} ·
-                ≈{levelInfo.rating} Elo · skill {levelInfo.skill}
+                ≈{bot.rating} Elo · {bot.style}
               </p>
             </div>
 
@@ -667,8 +753,7 @@ export default function PlayVsEngine({
                 {moves.length > 0 && (
                   <p className="mt-1 text-xs text-[var(--muted)]">
                     {Math.ceil(moves.length / 2)}{" "}
-                    {Math.ceil(moves.length / 2) === 1 ? "move" : "moves"} · Stockfish{" "}
-                    {levelInfo.name}
+                    {Math.ceil(moves.length / 2) === 1 ? "move" : "moves"} · {bot.name}
                     {clockOn ? ` · ${timeControl.label}` : ""}
                   </p>
                 )}
@@ -737,12 +822,16 @@ function ClockCard({
   value,
   active,
   low,
+  avatar,
+  accent,
 }: {
   label: string;
   sub: string;
   value: string;
   active: boolean;
   low: boolean;
+  avatar?: string;
+  accent?: string;
 }) {
   // Border colour is inline, not a Tailwind utility, so the active state cannot
   // depend on utility ordering — and there is no colour transition: a clock
@@ -755,12 +844,23 @@ function ClockCard({
         background: active ? "var(--panel-2)" : "var(--panel)",
       }}
     >
-      <div className="flex flex-col">
-        <span className="text-xs font-medium">{label}</span>
-        <span className="text-[10px] text-[var(--muted)]">
-          {sub}
-          {active ? " · to move" : ""}
-        </span>
+      <div className="flex items-center gap-2">
+        {avatar ? (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img
+            src={avatar}
+            alt={label}
+            className="h-8 w-8 rounded-full object-cover"
+            style={{ boxShadow: `0 0 0 2px ${accent ?? "var(--line)"}` }}
+          />
+        ) : null}
+        <div className="flex flex-col">
+          <span className="text-xs font-medium">{label}</span>
+          <span className="text-[10px] text-[var(--muted)]">
+            {sub}
+            {active ? " · to move" : ""}
+          </span>
+        </div>
       </div>
       <span
         className="font-mono text-lg tabular-nums"
