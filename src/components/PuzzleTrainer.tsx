@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Chess } from "chess.js";
 import { Chessboard } from "react-chessboard";
 import Link from "next/link";
@@ -75,16 +75,25 @@ export default function PuzzleTrainer({
     return true;
   }, []);
 
-  /** The opponent's automatic reply, one ply after a correct guess. */
-  const reply = useCallback(
-    (uci: string) => {
-      window.setTimeout(() => {
-        apply(uci);
-        setStep((prev) => prev + 1);
-      }, 380);
-    },
-    [apply],
-  );
+  // Any timer that advances the line must be cancellable: switching puzzles
+  // mid-reply used to leave a stray callback moving the *new* board.
+  const timers = useRef<number[]>([]);
+
+  const later = useCallback((fn: () => void, delay: number) => {
+    const id = window.setTimeout(() => {
+      timers.current = timers.current.filter((pending) => pending !== id);
+      fn();
+    }, delay);
+    timers.current.push(id);
+  }, []);
+
+  const cancelTimers = useCallback(() => {
+    for (const id of timers.current) window.clearTimeout(id);
+    timers.current = [];
+  }, []);
+
+  // Leaving the page mid-reply should not leave a timer running.
+  useEffect(() => () => cancelTimers(), [cancelTimers]);
 
   function onDrop({
     sourceSquare,
@@ -112,7 +121,12 @@ export default function PuzzleTrainer({
     }
     if (!legal) return false;
 
-    const expected = solution[step].slice(0, 4);
+    // Never index past the end of the line: a drop can land during the
+    // opponent's reply window, after the solution is already exhausted.
+    const expectedMove = solution[step];
+    if (!expectedMove) return false;
+
+    const expected = expectedMove.slice(0, 4);
 
     if (legal !== expected) {
       // First wrong move ends the attempt, exactly like Lichess.
@@ -135,22 +149,31 @@ export default function PuzzleTrainer({
       return true;
     }
 
-    // There is still an opponent reply in the stored line.
     play("success");
-    reply(solution[nextStep]);
-    setStep(nextStep + 1);
-    if (nextStep + 1 >= solution.length) {
-      setStatus("solved");
-      window.setTimeout(() => {
+
+    // The stored line alternates sides, so the next entry is the opponent's
+    // reply. Advance the index *only* if that move actually lands — a failed
+    // apply means the board and the line disagree, and jumping ahead would
+    // desync every later guess.
+    const opponentMove = solution[nextStep];
+    const isLastPly = nextStep + 1 >= solution.length;
+
+    later(() => {
+      if (!apply(opponentMove)) return;
+      setStep(nextStep + 1);
+      if (isLastPly) {
+        setStatus("solved");
         play("brilliant");
         void record(true);
-      }, 600);
-    }
+      }
+    }, 380);
+
     return true;
   }
 
   function reveal() {
-    if (status === "solved") return;
+    if (status === "solved" || status === "revealed") return;
+    cancelTimers();
     setStatus("revealed");
     let index = step;
     const timer = window.setInterval(() => {
@@ -158,14 +181,19 @@ export default function PuzzleTrainer({
         window.clearInterval(timer);
         return;
       }
-      apply(solution[index]);
+      if (!apply(solution[index])) {
+        window.clearInterval(timer);
+        return;
+      }
       index += 1;
       setStep(index);
     }, 420);
+    timers.current.push(timer);
     if (status === "solving") void record(false);
   }
 
   async function nextPuzzle() {
+    cancelTimers();
     setLoading(true);
     try {
       const fresh = await getPracticePuzzle(puzzle.id);
@@ -265,6 +293,7 @@ export default function PuzzleTrainer({
           {status !== "solving" && (
             <button
               onClick={() => {
+                cancelTimers();
                 setStatus("solving");
                 setStep(0);
                 setLastMove(null);
