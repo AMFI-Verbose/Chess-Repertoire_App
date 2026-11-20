@@ -6,6 +6,7 @@ import { Chessboard } from "react-chessboard";
 import { Chess } from "chess.js";
 
 import ModeTabs from "@/components/ModeTabs";
+import { saveEngineGame } from "@/app/actions";
 import { Engine } from "@/lib/engine";
 import { START_FEN, tryMove, turnOf } from "@/lib/chess";
 import { DARK_SQUARE, LIGHT_SQUARE } from "@/lib/boardTheme";
@@ -39,11 +40,14 @@ export default function PlayVsEngine({
   const [result, setResult] = useState<string | null>(null);
   const [showEval, setShowEval] = useState(true);
   const [evalCp, setEvalCp] = useState<number | null>(null);
+  const [savedId, setSavedId] = useState<string | null>(null);
 
   const engineRef = useRef<Engine | null>(null);
   const searchingFor = useRef<string | null>(null);
   const evalToken = useRef(0);
   const statusRef = useRef<Status>("playing");
+  // One finished game is saved once, no matter how many end-paths fire.
+  const savedRef = useRef<string | null>(null);
 
   statusRef.current = status;
 
@@ -60,6 +64,38 @@ export default function PlayVsEngine({
     };
   }, []);
 
+  /** Write the finished game to the database — exactly once per game. */
+  const persist = useCallback(
+    (
+      list: { san: string; uci: string }[],
+      finalFen: string,
+      outcome: "win" | "loss" | "draw",
+      text: string,
+    ) => {
+      if (savedRef.current) return;
+      // Resigning before the first move is not a game worth remembering.
+      if (list.length === 0) return;
+      savedRef.current = "saving";
+      saveEngineGame({
+        playerColor: youPlay === "w" ? "white" : "black",
+        skill,
+        result: outcome,
+        resultText: text,
+        san: list.map((move) => move.san),
+        fen: finalFen,
+      })
+        .then(({ id }) => {
+          savedRef.current = id;
+          setSavedId(id);
+        })
+        .catch(() => {
+          // A failed save must not strand the UI: allow a retry path later.
+          savedRef.current = null;
+        });
+    },
+    [skill, youPlay],
+  );
+
   /** Shared bookkeeping for both human and engine moves. */
   const commitMove = useCallback(
     (from: string, to: string, promotion?: string) => {
@@ -68,25 +104,34 @@ export default function PlayVsEngine({
       if (!result) return false;
 
       const next = new Chess(result.fen);
+      const nextMoves = [...moves, { san: result.san, uci: result.uci }];
       setFen(result.fen);
-      setMoves((previous) => [...previous, { san: result.san, uci: result.uci }]);
+      setMoves(nextMoves);
       play(result.captured ? "capture" : result.check ? "check" : "move");
 
       if (next.isGameOver()) {
         setStatus("ended");
+
         if (next.isCheckmate()) {
-          setResult(`${turnOf(current) === "w" ? "Black" : "White"} wins by checkmate`);
-        } else if (next.isStalemate()) {
-          setResult("Draw by stalemate");
-        } else if (next.isInsufficientMaterial()) {
-          setResult("Draw — insufficient material");
+          // Whoever is to move in the final position is the one who got mated.
+          const mated = turnOf(result.fen);
+          const won = mated !== youPlay;
+          const text = won ? "You won by checkmate" : "Stockfish won by checkmate";
+          setResult(text);
+          persist(nextMoves, result.fen, won ? "win" : "loss", text);
         } else {
-          setResult("Draw");
+          const text = next.isStalemate()
+            ? "Draw by stalemate"
+            : next.isInsufficientMaterial()
+              ? "Draw — insufficient material"
+              : "Draw";
+          setResult(text);
+          persist(nextMoves, result.fen, "draw", text);
         }
       }
       return true;
     },
-    [fen],
+    [fen, moves, persist, youPlay],
   );
 
   // ---- the engine's turn -------------------------------------------------
@@ -108,7 +153,8 @@ export default function PlayVsEngine({
         const uci = response.bestmove;
         if (!uci || uci.startsWith("(")) {
           setStatus("ended");
-          setResult("Engine resigned");
+          setResult("Stockfish resigned");
+          persist(moves, fen, "win", "Stockfish resigned");
           return;
         }
         commitMove(uci.slice(0, 2), uci.slice(2, 4), uci.length > 4 ? uci[4] : "q");
@@ -205,10 +251,18 @@ export default function PlayVsEngine({
     setMoves(kept);
     setStatus("playing");
     setResult(null);
+    if (status === "ended") {
+      // Rewinding after the game ended continues a *different* game, so the
+      // save guard has to be released or the continuation would never be stored.
+      savedRef.current = null;
+      setSavedId(null);
+    }
   }
 
   function newGame(nextSide: "w" | "b") {
     searchingFor.current = null;
+    savedRef.current = null;
+    setSavedId(null);
     setFen(START_FEN);
     setMoves([]);
     setYouPlay(nextSide);
@@ -346,8 +400,10 @@ export default function PlayVsEngine({
             </button>
             <button
               onClick={() => {
+                if (status !== "playing") return;
                 setStatus("ended");
                 setResult("You resigned");
+                persist(moves, fen, "loss", "You resigned");
               }}
               className="rounded-lg border border-[var(--line)] px-3 py-2 text-xs text-[var(--text)]"
             >
@@ -360,6 +416,30 @@ export default function PlayVsEngine({
               Play as {youPlay === "w" ? "black" : "white"}
             </button>
           </div>
+
+          {status === "ended" && (
+            <div className="rounded-xl border border-[var(--line)] bg-[var(--panel)] p-4">
+              <p className="text-[11px] uppercase tracking-wider text-[var(--muted)]">
+                Game over
+              </p>
+              <p className="mt-1 text-sm font-medium">{result}</p>
+              {moves.length > 0 && (
+                <p className="mt-1 text-xs text-[var(--muted)]">
+                  {Math.ceil(moves.length / 2)} moves · Stockfish skill {skill}
+                </p>
+              )}
+              {savedId ? (
+                <Link
+                  href={`/games/${savedId}`}
+                  className="mt-3 inline-block rounded-lg bg-[var(--accent)] px-3 py-2 text-xs font-medium text-[#0b1602]"
+                >
+                  Review this game →
+                </Link>
+              ) : moves.length > 0 ? (
+                <p className="mt-3 text-xs text-[var(--muted)]">Saving to history…</p>
+              ) : null}
+            </div>
+          )}
 
           <div className="rounded-xl border border-[var(--line)] bg-[var(--panel)] p-3">
             <p className="mb-2 text-[11px] uppercase tracking-wider text-[var(--muted)]">

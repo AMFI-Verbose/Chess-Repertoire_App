@@ -938,3 +938,109 @@ export async function addStudyToRepertoire(input: {
   revalidatePath("/");
   return { repertoireId: repertoire.id };
 }
+
+// ===========================================================================
+// Games you played against the engine
+// ===========================================================================
+
+export type GameAnalysis = {
+  accuracyWhite: number;
+  accuracyBlack: number;
+  acplWhite: number;
+  acplBlack: number;
+  labels: Record<string, number>;
+};
+
+export type SaveGameInput = {
+  playerColor: "white" | "black";
+  skill: number;
+  result: "win" | "loss" | "draw";
+  resultText: string;
+  /** San move text in order, exactly as the board played it. */
+  san: string[];
+  fen: string;
+};
+
+/**
+ * Persist a finished game.
+ *
+ * The client sends the SAN list rather than a PGN string: the server replays
+ * it with chess.js, which both validates the game (an illegal move throws) and
+ * produces a PGN with correct numbering and headers. Trusting a client-built
+ * PGN here would let a malformed game into the record.
+ */
+export async function saveEngineGame(input: SaveGameInput): Promise<{ id: string }> {
+  const game = new Chess();
+  let plies = 0;
+
+  for (const san of input.san) {
+    try {
+      game.move(san);
+      plies += 1;
+    } catch {
+      break; // stop at the first move that does not replay
+    }
+  }
+
+  game.setHeader("Event", "Play vs Stockfish");
+  game.setHeader("Site", "Chess Repertoire (local)");
+  game.setHeader(
+    "White",
+    input.playerColor === "white" ? "You" : `Stockfish (skill ${input.skill})`,
+  );
+  game.setHeader(
+    "Black",
+    input.playerColor === "black" ? "You" : `Stockfish (skill ${input.skill})`,
+  );
+  game.setHeader(
+    "Result",
+    input.result === "draw"
+      ? "1/2-1/2"
+      : (input.result === "win") === (input.playerColor === "white")
+        ? "1-0"
+        : "0-1",
+  );
+
+  const row = await prisma.game.create({
+    data: {
+      kind: "engine",
+      playerColor: input.playerColor,
+      result: input.result,
+      resultText: input.resultText.slice(0, 120),
+      skill: Math.max(0, Math.min(20, Math.round(input.skill))),
+      pgn: game.pgn({ maxWidth: 80, newline: "\n" }),
+      fen: input.fen,
+      plies,
+    },
+  });
+
+  revalidatePath("/games");
+  revalidatePath("/");
+  return { id: row.id };
+}
+
+/** Store the review's verdict on a saved game, so the history can show accuracy. */
+export async function saveGameAnalysis(input: {
+  gameId: string;
+  analysis: string;
+}): Promise<void> {
+  const game = await prisma.game.findUnique({
+    where: { id: input.gameId },
+    select: { id: true },
+  });
+  if (!game) return;
+
+  await prisma.game.update({
+    where: { id: input.gameId },
+    data: { analysis: input.analysis.slice(0, 4000) },
+  });
+
+  revalidatePath("/games");
+  revalidatePath(`/games/${input.gameId}`);
+}
+
+export async function deleteGame(gameId: string): Promise<void> {
+  await prisma.game.deleteMany({ where: { id: gameId } });
+  revalidatePath("/games");
+  revalidatePath("/");
+}

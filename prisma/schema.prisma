@@ -113,6 +113,25 @@ model PuzzleAttempt {
   @@index([createdAt])
 }
 
+/// One finished game against the engine. The PGN is the record; everything
+/// else is denormalised so the history list never has to replay it.
+model Game {
+  id          String   @id @default(cuid())
+  kind        String   @default("engine") // "engine" for now
+  playerColor String // "white" | "black" — the side you had
+  result      String // "win" | "loss" | "draw", from your point of view
+  resultText  String   @default("") // "You won by checkmate"
+  skill       Int      @default(12) // engine Skill Level, i.e. opponent strength
+  pgn         String
+  fen         String // final position, so the board can be restored without replay
+  plies       Int      @default(0)
+  /// JSON written by the review pass: accuracy + centipawn loss per colour.
+  analysis    String?
+  createdAt   DateTime @default(now())
+
+  @@index([createdAt])
+}
+
 /// One local player. There is no auth — this row *is* the current user.
 model Profile {
   id           String   @id @default("local")

@@ -1,12 +1,19 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import Link from "next/link";
 import { Chessboard } from "react-chessboard";
 
-import ModeTabs from "@/components/ModeTabs";
 import { Engine, scoreToCp, type EngineResult } from "@/lib/engine";
-import { LABEL_STYLES, classifyMove, materialFor, type MoveLabel } from "@/lib/classify";
+import {
+  LABEL_STYLES,
+  classifyMove,
+  materialFor,
+  moveAccuracy,
+  winPercent,
+  type MoveLabel,
+} from "@/lib/classify";
+import { saveGameAnalysis } from "@/app/actions";
 import {
   DARK_SQUARE,
   LIGHT_SQUARE,
@@ -32,20 +39,44 @@ const SOUND_FOR_LABEL: Record<MoveLabel, SoundName | null> = {
 /** Only the loud verdicts get a floating banner. */
 const FLASHES: MoveLabel[] = ["brilliant", "great", "inaccuracy", "mistake", "blunder"];
 
+export type ReviewSummary = {
+  accuracyWhite: number;
+  accuracyBlack: number;
+  acplWhite: number;
+  acplBlack: number;
+  /** How many moves per colour actually had an eval (book moves do not). */
+  ratedWhite: number;
+  ratedBlack: number;
+  labels: Record<string, number>;
+};
+
 export default function ReviewSequence({
-  repertoireId,
-  name,
-  side,
   moves,
-  bookPlies,
+  orientation,
+  title,
+  subtitle,
+  backHref = "/",
+  backLabel = "All repertoires",
+  tabs = null,
+  bookPlies = [],
+  gameId,
+  extra = null,
 }: {
-  repertoireId: string;
-  name: string;
-  side: "white" | "black";
   moves: ReviewMove[];
-  bookPlies: number[];
+  orientation: "white" | "black";
+  title: string;
+  subtitle?: string;
+  backHref?: string;
+  backLabel?: string;
+  tabs?: ReactNode;
+  bookPlies?: number[];
+  /** When reviewing a saved game, the verdict is written back to it. */
+  gameId?: string;
+  /** Extra cards for the sidebar (PGN export, result badge, …). */
+  extra?: ReactNode;
 }) {
   const [grades, setGrades] = useState<(MoveLabel | null)[]>([]);
+  const [summary, setSummary] = useState<ReviewSummary | null>(null);
   const [progress, setProgress] = useState(0);
   const [analysing, setAnalysing] = useState(true);
   const [at, setAt] = useState(0); // how many plies are on the board
@@ -79,7 +110,10 @@ export default function ReviewSequence({
       for (let index = 0; index < positions.length; index += 1) {
         if (cancelled) return;
         const result = await engine.search(positions[index], {
-          movetime: 300,
+          // 400ms, not 300: at 300 the eval noise near a label boundary (say a
+          // 120cp loss against a 125cp threshold) flipped the grade between
+          // two reviews of the same game.
+          movetime: 400,
           multiPv: 2,
           skill: 20,
         });
@@ -89,7 +123,13 @@ export default function ReviewSequence({
 
       if (cancelled) return;
 
-      const graded: MoveLabel[] = moves.map((move, index) => {
+      const graded: MoveLabel[] = [];
+      const counts: Record<string, number> = {};
+      const losses: { w: number[]; b: number[] } = { w: [], b: [] };
+      const accuracies: { w: number[]; b: number[] } = { w: [], b: [] };
+
+      for (let index = 0; index < moves.length; index += 1) {
+        const move = moves[index];
         const before = results[index];
         const after = results[index + 1];
 
@@ -108,7 +148,7 @@ export default function ReviewSequence({
         const shedMaterial =
           materialFor(move.fen, mover) <= materialFor(beforeFen, mover) - 2;
 
-        return classifyMove({
+        const label = classifyMove({
           best,
           second,
           played,
@@ -116,11 +156,40 @@ export default function ReviewSequence({
           isBook,
           isSacrifice: shedMaterial,
         });
-      });
+
+        graded.push(label);
+        counts[label] = (counts[label] ?? 0) + 1;
+
+        // Accuracy needs both ends of the move; book moves have no evaluative
+        // score, so they are excluded rather than counted as perfect.
+        if (label !== "book" && best !== null && played !== null) {
+          losses[mover].push(Math.max(0, best - played));
+          accuracies[mover].push(moveAccuracy(winPercent(best), winPercent(played)));
+        }
+      }
+
+      const verdict: ReviewSummary = {
+        accuracyWhite: mean(accuracies.w),
+        accuracyBlack: mean(accuracies.b),
+        acplWhite: Math.round(mean(losses.w)),
+        acplBlack: Math.round(mean(losses.b)),
+        ratedWhite: losses.w.length,
+        ratedBlack: losses.b.length,
+        labels: counts,
+      };
 
       if (cancelled) return;
       setGrades(graded);
+      setSummary(verdict);
       setAnalysing(false);
+
+      if (gameId) {
+        // Fire-and-forget: the board is already usable, and a failed write must
+        // not interrupt studying the game.
+        saveGameAnalysis({ gameId, analysis: JSON.stringify(verdict) }).catch(
+          () => undefined,
+        );
+      }
     })();
 
     return () => {
@@ -128,7 +197,7 @@ export default function ReviewSequence({
       engine.terminate();
       engineRef.current = null;
     };
-  }, [moves, positions, bookPlies]);
+  }, [moves, positions, bookPlies, gameId]);
 
   // ---- effects when you land on a move ------------------------------------
   const goTo = useCallback(
@@ -205,17 +274,17 @@ export default function ReviewSequence({
       <header className="mb-6 flex flex-wrap items-end justify-between gap-4">
         <div>
           <Link
-            href="/"
+            href={backHref}
             className="text-xs text-[var(--muted)] transition-colors hover:text-[var(--text)]"
           >
-            ← All repertoires
+            ← {backLabel}
           </Link>
-          <h1 className="mt-1 text-2xl font-semibold tracking-tight">{name}</h1>
+          <h1 className="mt-1 text-2xl font-semibold tracking-tight">{title}</h1>
           <p className="text-sm text-[var(--muted)]">
-            Review · every move graded by Stockfish
+            {subtitle ?? "Review · every move graded by Stockfish"}
           </p>
         </div>
-        <ModeTabs repertoireId={repertoireId} active="review" />
+        {tabs}
       </header>
 
       <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_340px]">
@@ -226,7 +295,7 @@ export default function ReviewSequence({
                 options={{
                   id: "review-board",
                   position: positions[at] || positions[0] || "",
-                  boardOrientation: side,
+                  boardOrientation: orientation,
                   squareStyles,
                   animationDurationInMs: 200,
                   lightSquareStyle: LIGHT_SQUARE,
@@ -309,6 +378,38 @@ export default function ReviewSequence({
                     {counts[label]} {LABEL_STYLES[label].label}
                   </span>
                 ))}
+            </div>
+          )}
+
+          {!analysing && summary && (
+            <div className="flex flex-wrap items-center gap-x-5 gap-y-1 text-xs text-[var(--muted)]">
+              {summary.ratedWhite === 0 && summary.ratedBlack === 0 ? (
+                <span>
+                  All {moves.length} moves were still opening book — no accuracy
+                  to compute yet.
+                </span>
+              ) : (
+                <>
+                  <span>
+                    White{" "}
+                    <strong className="text-[var(--text)]">
+                      {summary.ratedWhite > 0
+                        ? `${summary.accuracyWhite.toFixed(1)}%`
+                        : "—"}
+                    </strong>{" "}
+                    · ACPL {summary.ratedWhite > 0 ? summary.acplWhite : "—"}
+                  </span>
+                  <span>
+                    Black{" "}
+                    <strong className="text-[var(--text)]">
+                      {summary.ratedBlack > 0
+                        ? `${summary.accuracyBlack.toFixed(1)}%`
+                        : "—"}
+                    </strong>{" "}
+                    · ACPL {summary.ratedBlack > 0 ? summary.acplBlack : "—"}
+                  </span>
+                </>
+              )}
             </div>
           )}
         </section>
@@ -396,6 +497,11 @@ function MoveChip({
       ) : null}
     </button>
   );
+}
+
+function mean(values: number[]): number {
+  if (values.length === 0) return 0;
+  return values.reduce((total, value) => total + value, 0) / values.length;
 }
 
 function startFenOf(): string {
