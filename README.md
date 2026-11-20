@@ -21,6 +21,8 @@ code (`B90`) or move sequence (`1.e4 c5`), each previewable on a board.
 
 Start a game in one of three ways on **Play**: click a quick-pairing tile (1+0 … 10+0 or untimed) to begin immediately at Club level with a random colour; or set the opponent level, the clock, your colour and the starting position in the *New game* card and press **Start game**. Any repertoire's Play tab starts the same way. Pawns that reach the last rank open a promotion picker instead of silently becoming a queen.
 
+When a game ends, a card over the board offers **Analyse this game**, **Rematch** or **Study the position**. The stored game opens with every move graded — Book, Best, Excellent, Good, Inaccuracy, Mistake, Blunder, Great, Brilliant — plus accuracy and average centipawn loss per side.
+
 **Play** (`/play`, in the nav) is the front door: a *quick pairing* row that
 drops you into a game in one click — 1+0, 3+0, 3+2, 5+3, 10+0, or no clock, at
 the currently selected level — and a *custom game* card whose **Start game**

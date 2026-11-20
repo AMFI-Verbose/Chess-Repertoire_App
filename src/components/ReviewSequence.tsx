@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import Link from "next/link";
+import { Chess } from "chess.js";
 import { Chessboard } from "react-chessboard";
 
 import { Engine, scoreToCp, type EngineResult } from "@/lib/engine";
@@ -152,14 +153,28 @@ export default function ReviewSequence({
         const shedMaterial =
           materialFor(move.fen, mover) <= materialFor(beforeFen, mover) - 2;
 
-        const label = classifyMove({
-          best,
-          second,
-          played,
-          isBestMove,
-          isBook,
-          isSacrifice: shedMaterial,
-        });
+        // A move that ends the game in mate has no position after it to
+        // evaluate, so the engine scores come back empty and naive grading
+        // would call a mating move merely "Good". Mate is the best move.
+        let isMate = false;
+        try {
+          isMate = new Chess(move.fen).isCheckmate();
+        } catch {
+          isMate = false;
+        }
+
+        const label = isMate
+          ? shedMaterial
+            ? "brilliant"
+            : "best"
+          : classifyMove({
+              best,
+              second,
+              played,
+              isBestMove,
+              isBook,
+              isSacrifice: shedMaterial,
+            });
 
         graded.push(label);
         counts[label] = (counts[label] ?? 0) + 1;
@@ -389,8 +404,9 @@ export default function ReviewSequence({
             <div className="flex flex-wrap items-center gap-x-5 gap-y-1 text-xs text-[var(--muted)]">
               {summary.ratedWhite === 0 && summary.ratedBlack === 0 ? (
                 <span>
-                  All {moves.length} moves were still opening book — no accuracy
-                  to compute yet.
+                  {(counts.book ?? 0) === moves.length
+                    ? `All ${moves.length} moves were still opening book — no accuracy to compute.`
+                    : "This game was too short to score accuracy — the move labels above still stand."}
                 </span>
               ) : (
                 <>

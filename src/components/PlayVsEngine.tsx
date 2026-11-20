@@ -49,6 +49,7 @@ export default function PlayVsEngine({
   const [saveError, setSaveError] = useState(false);
   // A pawn reaching the last rank waits here until you pick a piece.
   const [promotion, setPromotion] = useState<{ from: string; to: string } | null>(null);
+  const [resultDismissed, setResultDismissed] = useState(false);
 
   // Clocks are milliseconds remaining, per side. 0 + clockOn = untimed.
   const [whiteMs, setWhiteMs] = useState(0);
@@ -115,6 +116,7 @@ export default function PlayVsEngine({
     setSavedId(null);
     setSaveError(false);
     setPromotion(null);
+    setResultDismissed(false);
     pendingRef.current = null;
     setWhiteMs(baseMs);
     setBlackMs(baseMs);
@@ -441,6 +443,64 @@ export default function PlayVsEngine({
       ) : (
         <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_320px]">
           <section className="relative flex flex-col items-center gap-3">
+            {status === "ended" && !resultDismissed && (
+              <div className="absolute inset-0 z-30 flex items-center justify-center rounded-xl bg-black/60 px-4">
+                <div className="relative w-full max-w-sm rounded-2xl border border-[var(--line)] bg-[var(--panel)] p-5 shadow-2xl">
+                  <button
+                    onClick={() => setResultDismissed(true)}
+                    aria-label="Dismiss"
+                    className="absolute right-3 top-3 text-sm text-[var(--muted)] hover:text-[var(--text)]"
+                  >
+                    ✕
+                  </button>
+                  <p className="text-[11px] uppercase tracking-[0.16em] text-[var(--muted)]">
+                    Game over
+                  </p>
+                  <p className="mt-1 text-xl font-semibold">{result ?? "Game over"}</p>
+                  <p className="mt-1 text-xs text-[var(--muted)]">
+                    {moves.length} {moves.length === 1 ? "move" : "moves"} ·
+                    Stockfish {levelInfo.name}
+                    {clockOn ? ` · ${timeControl.label}` : ""}
+                  </p>
+                  <div className="mt-4 flex flex-col gap-2">
+                    {savedId ? (
+                      <Link
+                        href={`/games/${savedId}`}
+                        className="rounded-lg bg-[var(--accent)] px-3 py-2 text-center text-sm font-medium text-[#0b1602]"
+                      >
+                        Analyse this game →
+                      </Link>
+                    ) : moves.length === 0 ? null : saveError ? (
+                      <button
+                        onClick={retrySave}
+                        className="rounded-lg border border-[#e0564b] px-3 py-2 text-sm text-[#e0564b]"
+                      >
+                        Couldn&apos;t save — retry
+                      </button>
+                    ) : (
+                      <span className="rounded-lg border border-[var(--line)] px-3 py-2 text-center text-sm text-[var(--muted)]">
+                        Saving for analysis…
+                      </span>
+                    )}
+                    <div className="flex gap-2">
+                      <button
+                        onClick={() => setPhase("setup")}
+                        className="flex-1 rounded-lg border border-[var(--line)] px-3 py-2 text-sm"
+                      >
+                        Rematch
+                      </button>
+                      <button
+                        onClick={() => setResultDismissed(true)}
+                        className="flex-1 rounded-lg border border-[var(--line)] px-3 py-2 text-sm text-[var(--muted)]"
+                      >
+                        Study the position
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+
             {promotion && (
               <div className="absolute inset-0 z-20 flex items-center justify-center rounded-xl bg-black/55">
                 <div className="rounded-xl border border-[var(--line)] bg-[var(--panel)] p-4 shadow-xl">
