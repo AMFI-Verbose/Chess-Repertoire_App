@@ -2,6 +2,7 @@ import Link from "next/link";
 
 import { prisma } from "@/lib/prisma";
 import { deleteGame } from "@/app/actions";
+import { levelByNumber } from "@/lib/gameOptions";
 
 export const dynamic = "force-dynamic";
 
@@ -130,10 +131,11 @@ export default async function GamesPage() {
                     href={`/games/${game.id}`}
                     className="block truncate text-sm font-medium hover:text-[var(--accent)]"
                   >
-                    vs Stockfish · skill {game.skill}
+                    vs Stockfish · {levelByNumber(game.level).name}
                   </Link>
                   <span className="mt-0.5 block text-[11px] text-[var(--muted)]">
                     {game.playerColor === "white" ? "White" : "Black"} ·{" "}
+                    {game.timeControl === "unlimited" ? "no clock" : game.timeControl} ·{" "}
                     {Math.ceil(game.plies / 2)} moves ·{" "}
                     {new Intl.DateTimeFormat("en-GB", {
                       dateStyle: "medium",

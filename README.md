@@ -12,10 +12,26 @@ Next.js 15 · TypeScript · Tailwind 4 · Prisma 6 · SQLite · chess.js · reac
 
 | Build | Play | Review |
 |---|---|---|
-| Author a move tree, add branches, write notes, import PGN. Opening names and transpositions are detected as you walk the line. | Face Stockfish 19 with an adjustable skill level, a live evaluation bar, take-backs and resign. Every finished game is saved. | Walk the line move by move; each move is graded **Brilliant · Great · Best · Excellent · Good · Book · Inaccuracy · Mistake · Blunder**, with colour, glyph, sound and a floating verdict. |
+| Author a move tree, add branches, write notes, import PGN. Opening names and transpositions are detected as you walk the line. | Face Stockfish 19 at eight named levels, with a real clock (bullet → classical), an optional custom start position, a live evaluation bar, take-backs and resign. Every finished game is saved. | Walk the line move by move; each move is graded **Brilliant · Great · Best · Excellent · Good · Book · Inaccuracy · Mistake · Blunder**, with colour, glyph, sound and a floating verdict. |
 
 Plus a searchable **opening library**: 3,865 ECO lines, searchable by name,
 code (`B90`) or move sequence (`1.e4 c5`), each previewable on a board.
+
+### Playing the engine
+
+Before the first move you set three things, the way a Lichess challenge screen does:
+
+| Setting | What it does |
+|---|---|
+| **Opponent** | Eight named levels (Novice ≈800 … Maximum ≈2900). A level sets Stockfish's *Skill Level* and its thinking time together, so it is weak in two ways at once, not just slow. Ratings are rough indicators, not measurements. |
+| **Time control** | Bullet 1+0 / 2+1, Blitz 3+0 / 3+2 / 5+0 / 5+3, Rapid 10+0 / 10+5 / 15+10, Classical 30+0, or no clock. Increment is added after the move that earned it. |
+| **Game type** | Standard, or **from a FEN** — start from any legal position (endgames, a middlegame you want to replay), validated by chess.js before the board opens. |
+
+The clock runs for the side to move, **including while Stockfish thinks**, and
+flagging loses the game: "You ran out of time" or "Stockfish ran out of time".
+A custom-start game is stored with `FEN`/`SetUp` PGN headers and replayed
+server-side from that position — otherwise the first black move would be
+rejected as illegal and the record would be silently truncated.
 
 ### Games you played
 
@@ -85,6 +101,10 @@ comments are sample content.
 | Game history | Reviewing a saved game |
 |---|---|
 | ![Games](docs/screenshots/games.png) | ![Game review](docs/screenshots/game-review.png) |
+
+| New game: level, clock, start |
+|---|
+| ![Setup](docs/screenshots/setup.png) |
 
 ---
 

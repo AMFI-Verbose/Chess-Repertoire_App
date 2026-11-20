@@ -122,6 +122,9 @@ model Game {
   result      String // "win" | "loss" | "draw", from your point of view
   resultText  String   @default("") // "You won by checkmate"
   skill       Int      @default(12) // engine Skill Level, i.e. opponent strength
+  level       Int      @default(4) // the named level you picked (1–8)
+  timeControl String   @default("unlimited") // "5+3", or "unlimited"
+  startFen    String   @default("") // non-standard start position, else empty
   pgn         String
   fen         String // final position, so the board can be restored without replay
   plies       Int      @default(0)

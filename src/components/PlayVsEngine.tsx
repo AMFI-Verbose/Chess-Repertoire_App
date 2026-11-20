@@ -6,20 +6,17 @@ import { Chessboard } from "react-chessboard";
 import { Chess } from "chess.js";
 
 import ModeTabs from "@/components/ModeTabs";
+import GameSetup, { type StartConfig } from "@/components/GameSetup";
 import { saveEngineGame } from "@/app/actions";
 import { Engine } from "@/lib/engine";
 import { START_FEN, tryMove, turnOf } from "@/lib/chess";
 import { DARK_SQUARE, LIGHT_SQUARE } from "@/lib/boardTheme";
 import { hintStyles } from "@/lib/boardHints";
 import { play } from "@/lib/sound";
+import { formatClock, levelByNumber, timeControlById } from "@/lib/gameOptions";
 
 type Status = "playing" | "ended";
-
-/** Engine strength: Skill Level 0–20 maps to "thinks for longer" and "tries harder". */
-function skillSettings(skill: number) {
-  const movetime = 120 + skill * 45; // 120ms at the bottom, ~1s at full strength
-  return { skill, movetime };
-}
+type Phase = "setup" | "game";
 
 export default function PlayVsEngine({
   repertoireId,
@@ -30,10 +27,17 @@ export default function PlayVsEngine({
   name: string;
   side: "white" | "black";
 }) {
+  const [phase, setPhase] = useState<Phase>("setup");
+
+  // --- what was chosen in the setup panel ---
+  const [level, setLevel] = useState(4);
+  const [tcId, setTcId] = useState("5+3");
+  const [youPlay, setYouPlay] = useState<"w" | "b">(side === "black" ? "b" : "w");
+  const [startFen, setStartFen] = useState(START_FEN);
+
+  // --- the game itself ---
   const [fen, setFen] = useState(START_FEN);
   const [moves, setMoves] = useState<{ san: string; uci: string }[]>([]);
-  const [youPlay, setYouPlay] = useState<"w" | "b">(side === "black" ? "b" : "w");
-  const [skill, setSkill] = useState(12);
   const [thinking, setThinking] = useState(false);
   const [selected, setSelected] = useState<string | null>(null);
   const [status, setStatus] = useState<Status>("playing");
@@ -41,15 +45,32 @@ export default function PlayVsEngine({
   const [showEval, setShowEval] = useState(true);
   const [evalCp, setEvalCp] = useState<number | null>(null);
   const [savedId, setSavedId] = useState<string | null>(null);
+  const [saveError, setSaveError] = useState(false);
+
+  // Clocks are milliseconds remaining, per side. 0 + clockOn = untimed.
+  const [whiteMs, setWhiteMs] = useState(0);
+  const [blackMs, setBlackMs] = useState(0);
 
   const engineRef = useRef<Engine | null>(null);
   const searchingFor = useRef<string | null>(null);
   const evalToken = useRef(0);
   const statusRef = useRef<Status>("playing");
-  // One finished game is saved once, no matter how many end-paths fire.
   const savedRef = useRef<string | null>(null);
+  // The last finished game, kept so a failed write can be retried without
+  // the player having to re-play it.
+  const pendingRef = useRef<{
+    list: { san: string; uci: string }[];
+    finalFen: string;
+    outcome: "win" | "loss" | "draw";
+    text: string;
+  } | null>(null);
+  const tickRef = useRef<number>(Date.now());
 
   statusRef.current = status;
+
+  const levelInfo = levelByNumber(level);
+  const timeControl = timeControlById(tcId);
+  const clockOn = timeControl.initial !== null;
 
   const getEngine = useCallback(() => {
     if (!engineRef.current) engineRef.current = new Engine();
@@ -64,6 +85,42 @@ export default function PlayVsEngine({
     };
   }, []);
 
+  const startGame = useCallback((config: StartConfig) => {
+    const resolved: "w" | "b" =
+      config.colour === "random"
+        ? Math.random() < 0.5
+          ? "w"
+          : "b"
+        : config.colour === "white"
+          ? "w"
+          : "b";
+    const start = config.fen ?? START_FEN;
+    const control = timeControlById(config.tcId);
+    const baseMs = control.initial === null ? 0 : control.initial * 1000;
+
+    setLevel(config.level);
+    setTcId(config.tcId);
+    setYouPlay(resolved);
+    setStartFen(start);
+
+    setFen(start);
+    setMoves([]);
+    setSelected(null);
+    setStatus("playing");
+    setResult(null);
+    setEvalCp(null);
+    setSavedId(null);
+    setSaveError(false);
+    pendingRef.current = null;
+    setWhiteMs(baseMs);
+    setBlackMs(baseMs);
+
+    searchingFor.current = null;
+    savedRef.current = null;
+    tickRef.current = Date.now();
+    setPhase("game");
+  }, []);
+
   /** Write the finished game to the database — exactly once per game. */
   const persist = useCallback(
     (
@@ -75,10 +132,15 @@ export default function PlayVsEngine({
       if (savedRef.current) return;
       // Resigning before the first move is not a game worth remembering.
       if (list.length === 0) return;
+      pendingRef.current = { list, finalFen, outcome, text };
       savedRef.current = "saving";
+      setSaveError(false);
       saveEngineGame({
         playerColor: youPlay === "w" ? "white" : "black",
-        skill,
+        skill: levelInfo.skill,
+        level: levelInfo.level,
+        timeControl: clockOn ? tcId : "unlimited",
+        startFen: startFen === START_FEN ? "" : startFen,
         result: outcome,
         resultText: text,
         san: list.map((move) => move.san),
@@ -89,12 +151,20 @@ export default function PlayVsEngine({
           setSavedId(id);
         })
         .catch(() => {
-          // A failed save must not strand the UI: allow a retry path later.
+          // The move list is still in pendingRef: show the failure rather than
+          // a spinner that never finishes.
           savedRef.current = null;
+          setSaveError(true);
         });
     },
-    [skill, youPlay],
+    [youPlay, levelInfo.skill, levelInfo.level, tcId, clockOn, startFen],
   );
+
+  const retrySave = useCallback(() => {
+    const pending = pendingRef.current;
+    if (!pending) return;
+    persist(pending.list, pending.finalFen, pending.outcome, pending.text);
+  }, [persist]);
 
   /** Shared bookkeeping for both human and engine moves. */
   const commitMove = useCallback(
@@ -108,6 +178,17 @@ export default function PlayVsEngine({
       setFen(result.fen);
       setMoves(nextMoves);
       play(result.captured ? "capture" : result.check ? "check" : "move");
+
+      // Increment goes to the side that just moved, and only after the move —
+      // the same order a real clock uses.
+      if (clockOn) {
+        const incrementMs = timeControl.increment * 1000;
+        if (turnOf(current) === "w") {
+          setWhiteMs((ms) => Math.max(0, ms) + incrementMs);
+        } else {
+          setBlackMs((ms) => Math.max(0, ms) + incrementMs);
+        }
+      }
 
       if (next.isGameOver()) {
         setStatus("ended");
@@ -131,11 +212,12 @@ export default function PlayVsEngine({
       }
       return true;
     },
-    [fen, moves, persist, youPlay],
+    [fen, moves, persist, youPlay, clockOn, timeControl.increment],
   );
 
   // ---- the engine's turn -------------------------------------------------
   useEffect(() => {
+    if (phase !== "game") return;
     if (status !== "playing") return;
     if (turnOf(fen) === youPlay) return;
     if (searchingFor.current === fen) return;
@@ -144,10 +226,9 @@ export default function PlayVsEngine({
     setThinking(true);
 
     let cancelled = false;
-    const settings = skillSettings(skill);
 
     getEngine()
-      .search(fen, { movetime: settings.movetime, skill: settings.skill })
+      .search(fen, { movetime: levelInfo.movetime, skill: levelInfo.skill })
       .then((response) => {
         if (cancelled || statusRef.current !== "playing") return;
         const uci = response.bestmove;
@@ -167,11 +248,45 @@ export default function PlayVsEngine({
     return () => {
       cancelled = true;
     };
-  }, [fen, youPlay, status, skill, commitMove, getEngine]);
+  }, [phase, fen, youPlay, status, levelInfo, commitMove, getEngine, moves, persist]);
+
+  // ---- clock -------------------------------------------------------------
+  useEffect(() => {
+    if (phase !== "game" || status !== "playing" || !clockOn) return;
+
+    tickRef.current = Date.now();
+    const timer = setInterval(() => {
+      const now = Date.now();
+      const elapsed = now - tickRef.current;
+      tickRef.current = now;
+
+      // The side to move burns its own clock — including while Stockfish thinks.
+      if (turnOf(fen) === "w") {
+        setWhiteMs((ms) => Math.max(0, ms - elapsed));
+      } else {
+        setBlackMs((ms) => Math.max(0, ms - elapsed));
+      }
+    }, 100);
+
+    return () => clearInterval(timer);
+  }, [phase, status, clockOn, fen]);
+
+  // ---- flag --------------------------------------------------------------
+  useEffect(() => {
+    if (phase !== "game" || status !== "playing" || !clockOn) return;
+    if (whiteMs > 0 && blackMs > 0) return;
+
+    const flagged = whiteMs <= 0 ? "w" : "b";
+    const won = flagged !== youPlay;
+    const text = won ? "Stockfish ran out of time" : "You ran out of time";
+    setStatus("ended");
+    setResult(text);
+    persist(moves, fen, won ? "win" : "loss", text);
+  }, [phase, status, clockOn, whiteMs, blackMs, youPlay, moves, fen, persist]);
 
   // ---- evaluation bar ----------------------------------------------------
   useEffect(() => {
-    if (!showEval) return;
+    if (!showEval || phase !== "game") return;
     const token = evalToken.current + 1;
     evalToken.current = token;
 
@@ -184,12 +299,11 @@ export default function PlayVsEngine({
         if (line.mateIn !== null) {
           setEvalCp(line.mateIn > 0 ? 9000 : -9000);
         } else if (line.scoreCp !== null) {
-          // Normalise to White's point of view for the bar.
           setEvalCp(turnOf(fen) === "w" ? line.scoreCp : -line.scoreCp);
         }
       })
       .catch(() => undefined);
-  }, [fen, showEval, getEngine]);
+  }, [fen, showEval, phase, getEngine]);
 
   function onDrop({
     sourceSquare,
@@ -238,7 +352,7 @@ export default function PlayVsEngine({
     // Take back your move *and* the engine's reply when there is one.
     const strip = turnOf(fen) === youPlay ? 2 : 1;
     const kept = moves.slice(0, Math.max(0, moves.length - strip));
-    const replay = new Chess();
+    const replay = new Chess(startFen);
     for (const move of kept) {
       replay.move({
         from: move.uci.slice(0, 2),
@@ -252,40 +366,26 @@ export default function PlayVsEngine({
     setStatus("playing");
     setResult(null);
     if (status === "ended") {
-      // Rewinding after the game ended continues a *different* game, so the
-      // save guard has to be released or the continuation would never be stored.
       savedRef.current = null;
       setSavedId(null);
     }
   }
 
-  function newGame(nextSide: "w" | "b") {
-    searchingFor.current = null;
-    savedRef.current = null;
-    setSavedId(null);
-    setFen(START_FEN);
-    setMoves([]);
-    setYouPlay(nextSide);
-    setStatus("playing");
-    setResult(null);
-    setEvalCp(null);
-  }
-
   const lastMove = moves.length > 0 ? moves[moves.length - 1].uci : null;
 
-  // Shared affordances: legal-move dots, selected square, checked king,
-  // plus the last-move tint this board already had.
   const squareStyles = hintStyles(fen, {
     selected,
     lastMove,
     legalMovesFor: selected,
   });
 
-  // Eval bar: 0 cp = half, ±1000 cp saturates.
   const whiteShare =
     evalCp === null ? 0.5 : 0.5 + Math.max(-1, Math.min(1, evalCp / 1000)) / 2;
-
   const rows = groupMoves(moves);
+
+  const yourMs = youPlay === "w" ? whiteMs : blackMs;
+  const theirMs = youPlay === "w" ? blackMs : whiteMs;
+  const yourTurn = turnOf(fen) === youPlay;
 
   return (
     <main className="mx-auto w-full max-w-6xl px-6 py-8">
@@ -298,172 +398,253 @@ export default function PlayVsEngine({
             ← All repertoires
           </Link>
           <h1 className="mt-1 text-2xl font-semibold tracking-tight">{name}</h1>
-          <p className="text-sm text-[var(--muted)]">Play against Stockfish 19</p>
+          <p className="text-sm text-[var(--muted)]">
+            {phase === "game"
+              ? `vs Stockfish · ${levelInfo.name} (≈${levelInfo.rating}) · ${
+                  clockOn ? `${timeControl.label} ${timeControl.category}` : "no clock"
+                }${startFen === START_FEN ? "" : " · custom position"}`
+              : "New game — pick an opponent, a clock and a start"}
+          </p>
         </div>
         <ModeTabs repertoireId={repertoireId} active="play" />
       </header>
 
-      <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_320px]">
-        <section className="flex flex-col items-center gap-3">
-          <div className="w-full max-w-[600px] overflow-hidden rounded-xl border border-[var(--line)] shadow-[0_10px_40px_-20px_rgba(0,0,0,0.9)]">
-            <Chessboard
-              options={{
-                id: "play-board",
-                position: fen,
-                boardOrientation: youPlay === "w" ? "white" : "black",
-                onPieceDrop: onDrop,
-                onSquareClick: onSquareClick,
-                onPieceDrag: ({ square }) => {
-                  if (!square) return;
-                  const board = new Chess(fen);
-                  const piece = board.get(square as never);
-                  if (piece && piece.color === board.turn()) setSelected(square);
-                },
-                onPieceDragCancel: () => setSelected(null),
-                squareStyles,
-                animationDurationInMs: 280,
-                lightSquareStyle: LIGHT_SQUARE,
-                darkSquareStyle: DARK_SQUARE,
-              }}
-            />
-          </div>
-          <p className="text-xs text-[var(--muted)]">
-            {result
-              ? result
-              : thinking
-                ? "Stockfish is thinking…"
-                : turnOf(fen) === youPlay
-                  ? "Your move"
-                  : "…"}
-          </p>
-        </section>
-
-        <aside className="flex flex-col gap-4">
-          <div className="rounded-xl border border-[var(--line)] bg-[var(--panel)] p-4">
-            <div className="flex items-center justify-between text-xs text-[var(--muted)]">
-              <span>Evaluation</span>
-              <span className="font-mono text-[var(--text)]">
-                {evalCp === null ? "—" : formatEval(evalCp)}
-              </span>
-            </div>
-            <div className="mt-2 h-2 overflow-hidden rounded-full bg-[#3a3733]">
-              <div
-                className="h-full bg-[#f0d9b5] transition-all duration-300"
-                style={{ width: `${whiteShare * 100}%` }}
-              />
-            </div>
-            <label className="mt-3 flex items-center gap-2 text-xs text-[var(--muted)]">
-              <input
-                type="checkbox"
-                checked={showEval}
-                onChange={(event) => setShowEval(event.target.checked)}
-                className="accent-[var(--accent)]"
-              />
-              Show evaluation
-            </label>
-          </div>
-
-          <div className="rounded-xl border border-[var(--line)] bg-[var(--panel)] p-4">
-            <div className="flex items-center justify-between text-xs text-[var(--muted)]">
-              <span>Engine strength</span>
-              <span className="font-mono text-[var(--text)]">
-                {skill <= 3 ? "Beginner" : skill <= 8 ? "Club" : skill <= 14 ? "Strong" : "Full"} · {skill}
-              </span>
-            </div>
-            <input
-              type="range"
-              min={0}
-              max={20}
-              value={skill}
-              onChange={(event) => setSkill(Number(event.target.value))}
-              className="mt-2 w-full accent-[var(--accent)]"
-            />
-            <p className="mt-1 text-[11px] leading-relaxed text-[var(--muted)]">
-              Skill Level makes Stockfish pick weaker moves on purpose — it is not
-              just a shorter search.
-            </p>
-          </div>
-
-          <div className="flex flex-wrap gap-2">
-            <button
-              onClick={() => newGame(youPlay)}
-              className="rounded-lg bg-[var(--accent)] px-3 py-2 text-xs font-medium text-[#0b1602]"
-            >
-              New game
-            </button>
-            <button
-              onClick={undo}
-              disabled={moves.length === 0}
-              className="rounded-lg border border-[var(--line)] px-3 py-2 text-xs text-[var(--text)] disabled:opacity-40"
-            >
-              Take back
-            </button>
-            <button
-              onClick={() => {
-                if (status !== "playing") return;
-                setStatus("ended");
-                setResult("You resigned");
-                persist(moves, fen, "loss", "You resigned");
-              }}
-              className="rounded-lg border border-[var(--line)] px-3 py-2 text-xs text-[var(--text)]"
-            >
-              Resign
-            </button>
-            <button
-              onClick={() => newGame(youPlay === "w" ? "b" : "w")}
-              className="rounded-lg border border-[var(--line)] px-3 py-2 text-xs text-[var(--text)]"
-            >
-              Play as {youPlay === "w" ? "black" : "white"}
-            </button>
-          </div>
-
-          {status === "ended" && (
-            <div className="rounded-xl border border-[var(--line)] bg-[var(--panel)] p-4">
-              <p className="text-[11px] uppercase tracking-wider text-[var(--muted)]">
-                Game over
-              </p>
-              <p className="mt-1 text-sm font-medium">{result}</p>
-              {moves.length > 0 && (
-                <p className="mt-1 text-xs text-[var(--muted)]">
-                  {Math.ceil(moves.length / 2)} moves · Stockfish skill {skill}
-                </p>
-              )}
-              {savedId ? (
-                <Link
-                  href={`/games/${savedId}`}
-                  className="mt-3 inline-block rounded-lg bg-[var(--accent)] px-3 py-2 text-xs font-medium text-[#0b1602]"
-                >
-                  Review this game →
-                </Link>
-              ) : moves.length > 0 ? (
-                <p className="mt-3 text-xs text-[var(--muted)]">Saving to history…</p>
-              ) : null}
-            </div>
-          )}
-
-          <div className="rounded-xl border border-[var(--line)] bg-[var(--panel)] p-3">
-            <p className="mb-2 text-[11px] uppercase tracking-wider text-[var(--muted)]">
-              Moves
-            </p>
-            {rows.length === 0 ? (
-              <p className="text-xs text-[var(--muted)]">No moves yet.</p>
-            ) : (
-              <div className="max-h-64 overflow-y-auto font-mono text-xs">
-                {rows.map((row) => (
-                  <div key={row.number} className="flex gap-3 py-0.5">
-                    <span className="w-8 shrink-0 text-[var(--muted)]">
-                      {row.number}.
-                    </span>
-                    <span className="w-16">{row.white}</span>
-                    <span className="w-16">{row.black ?? ""}</span>
-                  </div>
-                ))}
+      {phase === "setup" ? (
+        <div className="flex justify-center">
+          <GameSetup onStart={startGame} defaultLevel={4} />
+        </div>
+      ) : (
+        <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_320px]">
+          <section className="flex flex-col items-center gap-3">
+            {clockOn && (
+              <div className="grid w-full max-w-[600px] grid-cols-2 gap-2">
+                <ClockCard
+                  label="Stockfish"
+                  sub={`L${levelInfo.level}`}
+                  value={formatClock(theirMs)}
+                  active={status === "playing" && !yourTurn}
+                  low={theirMs < 20000}
+                />
+                <ClockCard
+                  label="You"
+                  sub={youPlay === "w" ? "white" : "black"}
+                  value={formatClock(yourMs)}
+                  active={status === "playing" && yourTurn}
+                  low={yourMs < 20000}
+                />
               </div>
             )}
-          </div>
-        </aside>
-      </div>
+
+            <div className="w-full max-w-[600px] overflow-hidden rounded-xl border border-[var(--line)] shadow-[0_10px_40px_-20px_rgba(0,0,0,0.9)]">
+              <Chessboard
+                options={{
+                  id: "play-board",
+                  position: fen,
+                  boardOrientation: youPlay === "w" ? "white" : "black",
+                  onPieceDrop: onDrop,
+                  onSquareClick: onSquareClick,
+                  onPieceDrag: ({ square }) => {
+                    if (!square) return;
+                    const board = new Chess(fen);
+                    const piece = board.get(square as never);
+                    if (piece && piece.color === board.turn()) setSelected(square);
+                  },
+                  onPieceDragCancel: () => setSelected(null),
+                  squareStyles,
+                  animationDurationInMs: 280,
+                  lightSquareStyle: LIGHT_SQUARE,
+                  darkSquareStyle: DARK_SQUARE,
+                }}
+              />
+            </div>
+
+            <p className="text-xs text-[var(--muted)]">
+              {result
+                ? result
+                : thinking
+                  ? "Stockfish is thinking…"
+                  : yourTurn
+                    ? "Your move"
+                    : "…"}
+            </p>
+          </section>
+
+          <aside className="flex flex-col gap-4">
+            <div className="rounded-xl border border-[var(--line)] bg-[var(--panel)] p-4">
+              <div className="flex items-center justify-between text-xs text-[var(--muted)]">
+                <span>Evaluation</span>
+                <span className="font-mono text-[var(--text)]">
+                  {evalCp === null ? "—" : formatEval(evalCp)}
+                </span>
+              </div>
+              <div className="mt-2 h-2 overflow-hidden rounded-full bg-[#3a3733]">
+                <div
+                  className="h-full bg-[#f0d9b5] transition-all duration-300"
+                  style={{ width: `${whiteShare * 100}%` }}
+                />
+              </div>
+              <label className="mt-3 flex items-center gap-2 text-xs text-[var(--muted)]">
+                <input
+                  type="checkbox"
+                  checked={showEval}
+                  onChange={(event) => setShowEval(event.target.checked)}
+                  className="accent-[var(--accent)]"
+                />
+                Show evaluation
+              </label>
+            </div>
+
+            <div className="rounded-xl border border-[var(--line)] bg-[var(--panel)] p-4">
+              <p className="text-[11px] uppercase tracking-wider text-[var(--muted)]">
+                Game
+              </p>
+              <p className="mt-1 text-sm font-medium">
+                Stockfish · {levelInfo.name}
+              </p>
+              <p className="mt-0.5 text-xs text-[var(--muted)]">
+                {clockOn ? `${timeControl.label} ${timeControl.category}` : "No clock"} ·
+                ≈{levelInfo.rating} Elo · skill {levelInfo.skill}
+              </p>
+            </div>
+
+            <div className="flex flex-wrap gap-2">
+              <button
+                onClick={() => setPhase("setup")}
+                className="rounded-lg border border-[var(--line)] px-3 py-2 text-xs text-[var(--text)]"
+              >
+                New game
+              </button>
+              <button
+                onClick={undo}
+                disabled={moves.length === 0}
+                className="rounded-lg border border-[var(--line)] px-3 py-2 text-xs text-[var(--text)] disabled:opacity-40"
+              >
+                Take back
+              </button>
+              <button
+                onClick={() => {
+                  if (status !== "playing") return;
+                  setStatus("ended");
+                  setResult("You resigned");
+                  persist(moves, fen, "loss", "You resigned");
+                }}
+                className="rounded-lg border border-[var(--line)] px-3 py-2 text-xs text-[var(--text)]"
+              >
+                Resign
+              </button>
+            </div>
+
+            {status === "ended" && (
+              <div className="rounded-xl border border-[var(--line)] bg-[var(--panel)] p-4">
+                <p className="text-[11px] uppercase tracking-wider text-[var(--muted)]">
+                  Game over
+                </p>
+                <p className="mt-1 text-sm font-medium">{result}</p>
+                {moves.length > 0 && (
+                  <p className="mt-1 text-xs text-[var(--muted)]">
+                    {Math.ceil(moves.length / 2)} moves · Stockfish {levelInfo.name}
+                    {clockOn ? ` · ${timeControl.label}` : ""}
+                  </p>
+                )}
+                <div className="mt-3 flex flex-wrap gap-2">
+                  {savedId ? (
+                    <Link
+                      href={`/games/${savedId}`}
+                      className="rounded-lg bg-[var(--accent)] px-3 py-2 text-xs font-medium text-[#0b1602]"
+                    >
+                      Review this game →
+                    </Link>
+                  ) : moves.length > 0 ? (
+                    saveError ? (
+                      <button
+                        onClick={retrySave}
+                        className="rounded-lg border border-[#e0564b] px-3 py-2 text-xs text-[#e0564b]"
+                      >
+                        Couldn&apos;t save — retry
+                      </button>
+                    ) : (
+                      <span className="text-xs text-[var(--muted)]">
+                        Saving to history…
+                      </span>
+                    )
+                  ) : null}
+                  <button
+                    onClick={() => setPhase("setup")}
+                    className="rounded-lg border border-[var(--line)] px-3 py-2 text-xs"
+                  >
+                    Rematch
+                  </button>
+                </div>
+              </div>
+            )}
+
+            <div className="rounded-xl border border-[var(--line)] bg-[var(--panel)] p-3">
+              <p className="mb-2 text-[11px] uppercase tracking-wider text-[var(--muted)]">
+                Moves
+              </p>
+              {rows.length === 0 ? (
+                <p className="text-xs text-[var(--muted)]">No moves yet.</p>
+              ) : (
+                <div className="max-h-64 overflow-y-auto font-mono text-xs">
+                  {rows.map((row) => (
+                    <div key={row.number} className="flex gap-3 py-0.5">
+                      <span className="w-8 shrink-0 text-[var(--muted)]">
+                        {row.number}.
+                      </span>
+                      <span className="w-16">{row.white}</span>
+                      <span className="w-16">{row.black ?? ""}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </aside>
+        </div>
+      )}
     </main>
+  );
+}
+
+function ClockCard({
+  label,
+  sub,
+  value,
+  active,
+  low,
+}: {
+  label: string;
+  sub: string;
+  value: string;
+  active: boolean;
+  low: boolean;
+}) {
+  // Border colour is inline, not a Tailwind utility, so the active state cannot
+  // depend on utility ordering — and there is no colour transition: a clock
+  // changes side instantly, and an animated border reads as lag.
+  return (
+    <div
+      className="flex items-center justify-between rounded-lg border px-3 py-2"
+      style={{
+        borderColor: active ? "var(--accent)" : "var(--line)",
+        background: active ? "var(--panel-2)" : "var(--panel)",
+      }}
+    >
+      <div className="flex flex-col">
+        <span className="text-xs font-medium">{label}</span>
+        <span className="text-[10px] text-[var(--muted)]">
+          {sub}
+          {active ? " · to move" : ""}
+        </span>
+      </div>
+      <span
+        className="font-mono text-lg tabular-nums"
+        style={{
+          color: low ? "#e0564b" : active ? "var(--text)" : "var(--muted)",
+        }}
+      >
+        {value}
+      </span>
+    </div>
   );
 }
 

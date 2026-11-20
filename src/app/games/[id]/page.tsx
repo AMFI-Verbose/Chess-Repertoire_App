@@ -3,7 +3,8 @@ import { notFound } from "next/navigation";
 import { prisma } from "@/lib/prisma";
 import ReviewSequence, { type ReviewMove } from "@/components/ReviewSequence";
 import CopyPgn from "@/components/CopyPgn";
-import { normalizedFen, parsePgnGame } from "@/lib/chess";
+import { START_FEN, normalizedFen, parsePgnGame } from "@/lib/chess";
+import { levelByNumber } from "@/lib/gameOptions";
 
 export const dynamic = "force-dynamic";
 
@@ -49,8 +50,12 @@ export default async function GamePage({
     <ReviewSequence
       moves={moves}
       orientation={game.playerColor === "black" ? "black" : "white"}
-      title={`vs Stockfish · skill ${game.skill}`}
-      subtitle={`${game.resultText} · ${new Intl.DateTimeFormat("en-GB", {
+      title={`vs Stockfish · ${levelByNumber(game.level).name} (≈${
+        levelByNumber(game.level).rating
+      })`}
+      subtitle={`${game.resultText} · ${
+        game.timeControl === "unlimited" ? "no clock" : game.timeControl
+      } · ${new Intl.DateTimeFormat("en-GB", {
         dateStyle: "medium",
         timeStyle: "short",
       }).format(game.createdAt)}`}
@@ -58,6 +63,7 @@ export default async function GamePage({
       backLabel="All games"
       gameId={game.id}
       bookPlies={bookPlies}
+      startFen={game.startFen || START_FEN}
       extra={
         <div className="flex flex-col gap-2">
           <div

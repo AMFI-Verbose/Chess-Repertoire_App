@@ -954,6 +954,9 @@ export type GameAnalysis = {
 export type SaveGameInput = {
   playerColor: "white" | "black";
   skill: number;
+  level: number;
+  timeControl: string;
+  startFen: string;
   result: "win" | "loss" | "draw";
   resultText: string;
   /** San move text in order, exactly as the board played it. */
@@ -970,7 +973,16 @@ export type SaveGameInput = {
  * PGN here would let a malformed game into the record.
  */
 export async function saveEngineGame(input: SaveGameInput): Promise<{ id: string }> {
-  const game = new Chess();
+  // Replay from the position the game actually began in. Replaying a game that
+  // started from a custom FEN against the standard start position rejects the
+  // first black move as illegal and silently stores a truncated game.
+  let game: Chess;
+  try {
+    game = input.startFen ? new Chess(input.startFen) : new Chess();
+  } catch {
+    game = new Chess();
+  }
+
   let plies = 0;
 
   for (const san of input.san) {
@@ -983,6 +995,12 @@ export async function saveEngineGame(input: SaveGameInput): Promise<{ id: string
   }
 
   game.setHeader("Event", "Play vs Stockfish");
+  if (input.startFen) {
+    // Without these two headers the PGN would claim the game began on move 1
+    // from the standard position, and the replay would fail on the first move.
+    game.setHeader("SetUp", "1");
+    game.setHeader("FEN", input.startFen);
+  }
   game.setHeader("Site", "Chess Repertoire (local)");
   game.setHeader(
     "White",
@@ -1005,6 +1023,9 @@ export async function saveEngineGame(input: SaveGameInput): Promise<{ id: string
     data: {
       kind: "engine",
       playerColor: input.playerColor,
+      level: Math.max(1, Math.min(8, Math.round(input.level))),
+      timeControl: input.timeControl.slice(0, 12),
+      startFen: input.startFen.slice(0, 200),
       result: input.result,
       resultText: input.resultText.slice(0, 120),
       skill: Math.max(0, Math.min(20, Math.round(input.skill))),
