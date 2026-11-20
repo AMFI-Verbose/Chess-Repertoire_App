@@ -21,7 +21,31 @@ code (`B90`) or move sequence (`1.e4 c5`), each previewable on a board.
 
 | Puzzles | Community |
 |---|---|
-| A fresh tactic every day from Lichess's public API, cached locally so it works offline; a seeded practice set, and an **Elo rating that moves after every attempt** (K = 40 / 32 / 24). Streak and accuracy stored in SQLite. | Annotated games (Morphy 1858, Anderssen 1851, Légal's trap) with a comment thread on each. Step through with ← / →, post a comment, or copy the whole game into a new repertoire in one click. |
+| A fresh tactic every day from Lichess's public API, plus an **offline library of 30,000 tactics** imported from Lichess's public puzzle database. Practice difficulty tracks your Elo, and every attempt moves a rating (K = 40 / 32 / 24). Streak and accuracy stored in SQLite. | Annotated games (Morphy 1858, Anderssen 1851, Légal's trap) with a comment thread on each. Step through with ← / →, post a comment, or copy the whole game into a new repertoire in one click. |
+
+### The puzzle library
+
+`npm run db:puzzles` streams Lichess's 5M-row puzzle archive through `zstd`,
+keeps tactics in a usable rating band with short solutions, replays each line
+with chess.js to prove it is legal, and bulk-inserts them into SQLite. It is
+additive — run it again with `-- --count=60000` to take more. Nothing is
+fetched at play time.
+
+```bash
+curl -L -o .cache/lichess_db_puzzle.csv.zst \
+  https://database.lichess.org/lichess_db_puzzle.csv.zst
+npm run db:puzzles                       # 30,000 tactics, ratings 700-2400
+npm run db:puzzles -- --count=60000      # top up later
+```
+
+Two details worth knowing, because the archive is not shaped like you expect:
+
+1. The stored FEN is the position **before the opponent's setup move**, and
+   that move is listed first. `Qxh5 Qg2#` with White to move is not "White
+   mates" — it is White's Qxh5, then the solver (Black) answers Qg2#. The
+   importer plays the setup move first, so the board you see is always yours.
+2. The archive sometimes appends the move that ended the real game. Lines are
+   truncated at checkmate.
 
 Both are deliberately local-first: there is no server and no account. The
 library ships with the app and the threads live in your own database — seeded
@@ -62,7 +86,8 @@ copied out of `node_modules` automatically by `predev` / `prebuild`.
 | `npm run db:studio` | Prisma Studio — browse the tables |
 | `npm run db:openings` | Re-download the Lichess ECO table (needs network) |
 | `npm run db:seed` | Recreate the two sample repertoires |
-| `npm run db:content` | Load the built-in puzzle set and study library |
+| `npm run db:content` | Load the built-in seeded puzzles and study library |
+| `npm run db:puzzles` | Import tactics from Lichess's puzzle archive (needs `.cache/…csv.zst`) |
 | `npm run db:reset` | Wipe + migrate + reseed everything |
 
 ---

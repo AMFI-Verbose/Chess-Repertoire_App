@@ -689,7 +689,13 @@ export async function getDailyPuzzle(): Promise<{
   return { puzzle: toPuzzleDTO(row), stats: await puzzleStats(), isDaily };
 }
 
-/** A random local puzzle, different from the one just shown. */
+/**
+ * Adaptive practice puzzle.
+ *
+ * Difficulty is anchored to the player's rating, so the pool gets harder as
+ * the Elo climbs. We widen the search only when the narrow band is empty, and
+ * we skip the puzzles attempted most recently so a session does not repeat.
+ */
 export async function getPracticePuzzle(excludeId: string): Promise<{
   puzzle: PuzzleDTO;
   stats: PuzzleStats;
@@ -704,34 +710,52 @@ export async function getPracticePuzzle(excludeId: string): Promise<{
     source: true,
   } as const;
 
-  // Count the *filtered* set, not the whole table. Skipping a random index
-  // drawn from the full count meant the offset could land past the end of the
-  // shorter filtered list, and findFirst returned null.
-  const where = { id: { not: excludeId } };
-  const candidates = await prisma.puzzle.count({ where });
+  const profile = await ensureProfile();
+  const rating = profile.puzzleRating;
 
-  if (candidates === 0) {
-    // Only one puzzle in the database: return it instead of failing, so the
-    // button never dies with a 500.
-    const only = await prisma.puzzle.findUnique({
-      where: { id: excludeId },
-      select,
-    });
-    if (!only) throw new Error("No puzzles available — run `npm run db:content`");
-    return { puzzle: toPuzzleDTO(only), stats: await puzzleStats() };
-  }
-
-  const skip = Math.floor(Math.random() * candidates);
-  const row = await prisma.puzzle.findFirst({
-    skip,
-    orderBy: { createdAt: "asc" },
-    where,
-    select,
+  const recent = await prisma.puzzleAttempt.findMany({
+    orderBy: { createdAt: "desc" },
+    take: 24,
+    select: { puzzleId: true },
   });
 
-  if (!row) throw new Error("No puzzles available — run `npm run db:content`");
+  const excluded = Array.from(
+    new Set([excludeId, ...recent.map((attempt) => attempt.puzzleId)]),
+  );
 
-  return { puzzle: toPuzzleDTO(row), stats: await puzzleStats() };
+  // Narrow first: a puzzle rated close to you is the useful one. The upper
+  // edge is a little further out, so you are usually reaching slightly up.
+  const bands: Array<[number, number]> = [
+    [rating - 60, rating + 120],
+    [rating - 150, rating + 220],
+    [Math.max(400, rating - 350), rating + 400],
+    [400, 3200],
+  ];
+
+  for (const [min, max] of bands) {
+    const where = { rating: { gte: min, lte: max }, id: { notIn: excluded } };
+    const count = await prisma.puzzle.count({ where });
+    if (count === 0) continue;
+
+    const row = await prisma.puzzle.findFirst({
+      where,
+      orderBy: [{ rating: "asc" }, { id: "asc" }],
+      skip: Math.floor(Math.random() * count),
+      select,
+    });
+    if (row) return { puzzle: toPuzzleDTO(row), stats: await puzzleStats() };
+  }
+
+  // Every puzzle in the recent list was the whole table: repeat one rather
+  // than fail the request.
+  const fallback = await prisma.puzzle.findFirst({
+    where: { id: { not: excludeId } },
+    orderBy: { createdAt: "asc" },
+    select,
+  });
+  if (!fallback) throw new Error("No puzzles available — run `npm run db:puzzles`");
+
+  return { puzzle: toPuzzleDTO(fallback), stats: await puzzleStats() };
 }
 
 export async function submitPuzzleAttempt(input: {

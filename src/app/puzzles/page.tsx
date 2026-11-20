@@ -1,4 +1,5 @@
 import { getDailyPuzzle } from "@/app/actions";
+import { prisma } from "@/lib/prisma";
 import PuzzleTrainer from "@/components/PuzzleTrainer";
 
 export const dynamic = "force-dynamic";
@@ -8,7 +9,10 @@ export const metadata = {
 };
 
 export default async function PuzzlesPage() {
-  const { puzzle, stats, isDaily } = await getDailyPuzzle();
+  const [{ puzzle, stats, isDaily }, libraryCount] = await Promise.all([
+    getDailyPuzzle(),
+    prisma.puzzle.count(),
+  ]);
 
   return (
     <main className="mx-auto max-w-5xl px-6 py-10">
@@ -18,8 +22,10 @@ export default async function PuzzlesPage() {
         </p>
         <h1 className="text-3xl font-semibold tracking-tight">Puzzles</h1>
         <p className="mt-2 max-w-xl text-sm leading-relaxed text-[var(--muted)]">
-          One fresh tactic every day, plus a practice set that ships offline.
-          Your solve streak is stored locally — no account required.
+          One fresh tactic every day from Lichess, plus
+          <strong className="text-[var(--text)]"> {libraryCount.toLocaleString()} </strong>
+          tactics stored offline. Practice difficulty tracks your rating, so the
+          set hardens as your Elo climbs.
         </p>
       </header>
 
