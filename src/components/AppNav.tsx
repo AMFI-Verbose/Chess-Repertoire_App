@@ -7,6 +7,7 @@ const LINKS = [
   { href: "/", label: "Repertoires" },
   { href: "/openings", label: "Openings" },
   { href: "/puzzles", label: "Puzzles" },
+  { href: "/games", label: "Games" },
   { href: "/community", label: "Community" },
 ];
 

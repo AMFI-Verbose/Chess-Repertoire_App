@@ -2,6 +2,7 @@ import { notFound } from "next/navigation";
 
 import { prisma } from "@/lib/prisma";
 import ReviewSequence, { type ReviewMove } from "@/components/ReviewSequence";
+import ModeTabs from "@/components/ModeTabs";
 import { normalizedFen } from "@/lib/chess";
 
 export const dynamic = "force-dynamic";
@@ -64,10 +65,12 @@ export default async function ReviewPage({
 
   return (
     <ReviewSequence
-      repertoireId={repertoire.id}
-      name={repertoire.name}
-      side={repertoire.side === "black" ? "black" : "white"}
       moves={moves}
+      orientation={repertoire.side === "black" ? "black" : "white"}
+      title={repertoire.name}
+      backHref="/"
+      backLabel="All repertoires"
+      tabs={<ModeTabs repertoireId={repertoire.id} active="review" />}
       bookPlies={bookPlies}
     />
   );

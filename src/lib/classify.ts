@@ -69,17 +69,21 @@ export type ClassifyInput = {
 export function classifyMove(input: ClassifyInput): MoveLabel {
   const { best, second, played, isBestMove, isBook, isSacrifice } = input;
 
-  if (isBook) return "book";
+  if (best === null || played === null) return isBook ? "book" : "good";
 
-  if (best === null || played === null) return "good";
+  const loss = best - played;
+
+  // Being inside a known opening does not excuse a losing move: 2.Ke2 is in
+  // the ECO table (the Bongcloud), but it still throws away most of White's
+  // advantage. Only a move that is both in the book *and* near-best keeps the
+  // "Book" label; anything worse is graded on what it actually cost.
+  if (isBook && loss <= 60) return "book";
 
   if (isBestMove) {
     if (isSacrifice && played > -50) return "brilliant";
     if (second !== null && best - second > 150) return "great";
     return "best";
   }
-
-  const loss = best - played;
 
   if (loss <= 20) return "excellent";
   if (loss <= 60) return "good";
@@ -104,4 +108,26 @@ export function materialFor(fen: string, side: "w" | "b"): number {
     if ((side === "w") === isWhite) total += piece;
   }
   return total;
+}
+
+/**
+ * Win percentage from a centipawn score.
+ *
+ * This is the curve Lichess uses to turn an eval into "how likely is a win",
+ * which matters because accuracy is defined on win% swings, not raw centipawns:
+ * dropping 100 cp at +0.00 hurts far more than at +8.00.
+ */
+export function winPercent(cp: number): number {
+  return 50 + 50 * (2 / (1 + Math.exp(-0.00368208 * cp)) - 1);
+}
+
+/**
+ * Accuracy for one move, from the win% before it and after it (mover's view).
+ * The constants are the ones published for this curve (103.1668 / 0.04354 /
+ * 3.1669), clipped to 0–100 so a single bad move cannot produce a negative.
+ */
+export function moveAccuracy(winBefore: number, winAfter: number): number {
+  const swing = Math.max(0, winBefore - winAfter);
+  const raw = 103.1668 * Math.exp(-0.04354 * swing) - 3.1669;
+  return Math.max(0, Math.min(100, raw));
 }

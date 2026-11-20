@@ -12,10 +12,31 @@ Next.js 15 · TypeScript · Tailwind 4 · Prisma 6 · SQLite · chess.js · reac
 
 | Build | Play | Review |
 |---|---|---|
-| Author a move tree, add branches, write notes, import PGN. Opening names and transpositions are detected as you walk the line. | Face Stockfish 19 with an adjustable skill level, a live evaluation bar, take-backs and resign. | Walk the line move by move; each move is graded **Brilliant · Great · Best · Excellent · Good · Book · Inaccuracy · Mistake · Blunder**, with colour, glyph, sound and a floating verdict. |
+| Author a move tree, add branches, write notes, import PGN. Opening names and transpositions are detected as you walk the line. | Face Stockfish 19 with an adjustable skill level, a live evaluation bar, take-backs and resign. Every finished game is saved. | Walk the line move by move; each move is graded **Brilliant · Great · Best · Excellent · Good · Book · Inaccuracy · Mistake · Blunder**, with colour, glyph, sound and a floating verdict. |
 
 Plus a searchable **opening library**: 3,865 ECO lines, searchable by name,
 code (`B90`) or move sequence (`1.e4 c5`), each previewable on a board.
+
+### Games you played
+
+Play → resign or get mated, and the game lands in **Games** (`/games`) as a
+PGN with result, colour, opponent skill and move count. Open one and you get
+the same review board: ← / → walks the game, each move is graded, and the
+sidebar offers the PGN for export.
+
+Games are stored by replaying the move list server-side with chess.js, so a
+corrupted client cannot write an illegal game into the record. The review pass
+then writes **accuracy** and **average centipawn loss** back onto that row:
+
+- accuracy = the mean of per-move scores on the published win-percentage curve
+  (`winPercent(cp) = 50 + 50 · (2/(1+e^(−0.00368208·cp)) − 1)`, then
+  `103.1668 · e^(−0.04354·swing) − 3.1669`), clipped to 0–100
+- ACPL = mean centipawn loss per colour
+
+Opening moves are excluded from both: an unplayed Houdini line is not evidence
+of skill. And a move is not "Book" merely because its position is in the ECO
+table — `2.Ke2` is the Bongcloud and still costs a queen's worth of advantage,
+so it is graded on what it costs.
 
 ### Puzzles and community
 
@@ -60,6 +81,10 @@ comments are sample content.
 | Play vs Stockfish | Review with grading |
 |---|---|
 | ![Play](docs/screenshots/play.png) | ![Review](docs/screenshots/review.png) |
+
+| Game history | Reviewing a saved game |
+|---|---|
+| ![Games](docs/screenshots/games.png) | ![Game review](docs/screenshots/game-review.png) |
 
 ---
 

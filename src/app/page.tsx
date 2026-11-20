@@ -6,8 +6,16 @@ import { createRepertoire } from "./actions";
 export const dynamic = "force-dynamic";
 
 export default async function DashboardPage() {
-  const [repertoires, openingCount, solvedPuzzles, studyCount, recentAttempts, profile] =
-    await Promise.all([
+  const [
+    repertoires,
+    openingCount,
+    solvedPuzzles,
+    studyCount,
+    recentAttempts,
+    profile,
+    gameCount,
+    recentGames,
+  ] = await Promise.all([
       prisma.repertoire.findMany({
         orderBy: { updatedAt: "desc" },
         include: { _count: { select: { nodes: true } } },
@@ -21,6 +29,19 @@ export default async function DashboardPage() {
         select: { solved: true },
       }),
       prisma.profile.findUnique({ where: { id: "local" } }),
+      prisma.game.count(),
+      prisma.game.findMany({
+        orderBy: { createdAt: "desc" },
+        take: 3,
+        select: {
+          id: true,
+          result: true,
+          skill: true,
+          playerColor: true,
+          plies: true,
+          createdAt: true,
+        },
+      }),
     ]);
 
   let streak = 0;
@@ -34,6 +55,7 @@ export default async function DashboardPage() {
     { label: "Puzzle rating", value: profile?.puzzleRating ?? 1500 },
     { label: "Puzzles solved", value: solvedPuzzles },
     { label: "Solve streak", value: streak },
+    { label: "Games vs engine", value: gameCount },
   ];
   void studyCount;
 
@@ -53,7 +75,7 @@ export default async function DashboardPage() {
         </p>
       </header>
 
-      <div className="mb-8 grid grid-cols-2 gap-3 sm:grid-cols-4">
+      <div className="mb-8 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
         {stats.map((stat) => (
           <div
             key={stat.label}
@@ -67,7 +89,7 @@ export default async function DashboardPage() {
         ))}
       </div>
 
-      <div className="mb-10 grid gap-3 sm:grid-cols-3">
+      <div className="mb-10 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
         <Link
           href="/openings"
           className="group flex items-center gap-4 rounded-xl border border-[var(--line)] bg-[var(--panel)] px-5 py-4 transition hover:border-[var(--accent)]"
@@ -94,6 +116,23 @@ export default async function DashboardPage() {
             <span className="block font-medium">Daily puzzle</span>
             <span className="mt-0.5 block text-xs text-[var(--muted)]">
               Fresh tactic every day, plus practice
+            </span>
+          </span>
+        </Link>
+
+        <Link
+          href="/games"
+          className="group flex items-center gap-4 rounded-xl border border-[var(--line)] bg-[var(--panel)] px-5 py-4 transition hover:border-[var(--accent)]"
+        >
+          <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-[var(--line)] bg-[#f0d9b5] text-lg text-[#b58863]">
+            ♞
+          </span>
+          <span className="min-w-0 flex-1">
+            <span className="block font-medium">Your games</span>
+            <span className="mt-0.5 block text-xs text-[var(--muted)]">
+              {gameCount === 0
+                ? "Play Stockfish — every game is saved"
+                : `${gameCount} saved · replay & grade`}
             </span>
           </span>
         </Link>
@@ -160,6 +199,55 @@ export default async function DashboardPage() {
                 );
               })}
             </ul>
+          )}
+          {recentGames.length > 0 && (
+            <div className="mt-8">
+              <div className="mb-3 flex items-baseline justify-between">
+                <h2 className="text-[11px] font-medium uppercase tracking-wider text-[var(--muted)]">
+                  Recent games
+                </h2>
+                <Link
+                  href="/games"
+                  className="text-[11px] text-[var(--muted)] transition hover:text-[var(--accent)]"
+                >
+                  All {gameCount} →
+                </Link>
+              </div>
+              <ul className="flex flex-col gap-2">
+                {recentGames.map((game) => (
+                  <li key={game.id}>
+                    <Link
+                      href={`/games/${game.id}`}
+                      className="flex items-center gap-3 rounded-xl border border-[var(--line)] bg-[var(--panel)] px-4 py-2.5 transition hover:border-[var(--accent)]"
+                    >
+                      <span
+                        className="w-11 shrink-0 rounded-md py-0.5 text-center text-[10px] font-semibold"
+                        style={{
+                          background:
+                            game.result === "win"
+                              ? "#81b64c"
+                              : game.result === "loss"
+                                ? "#e0564b"
+                                : "#c2a35a",
+                          color: "#0b1602",
+                        }}
+                      >
+                        {game.result === "win" ? "WIN" : game.result === "loss" ? "LOSS" : "DRAW"}
+                      </span>
+                      <span className="min-w-0 flex-1 truncate text-xs">
+                        vs Stockfish · skill {game.skill} · {game.playerColor} ·{" "}
+                        {Math.ceil(game.plies / 2)} moves
+                      </span>
+                      <span className="shrink-0 text-[11px] text-[var(--muted)]">
+                        {new Intl.DateTimeFormat("en-GB", { dateStyle: "short" }).format(
+                          game.createdAt,
+                        )}
+                      </span>
+                    </Link>
+                  </li>
+                ))}
+              </ul>
+            </div>
           )}
         </section>
 
