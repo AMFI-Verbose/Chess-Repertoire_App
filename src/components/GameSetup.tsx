@@ -9,7 +9,6 @@ import {
   levelByNumber,
   timeControlById,
   type GameMode,
-  type TimeControl,
 } from "@/lib/gameOptions";
 
 export type StartConfig = {
@@ -20,19 +19,15 @@ export type StartConfig = {
   fen: string | null;
 };
 
-const CATEGORIES = ["Bullet", "Blitz", "Rapid", "Classical", "Untimed"] as const;
-
-/** One-click pairings — the Lichess "quick pairing" grid. */
 const QUICK = ["1+0", "3+0", "3+2", "5+3", "10+0", "unlimited"] as const;
+const GROUPS = ["Bullet", "Blitz", "Rapid", "Classical"] as const;
 
 export default function GameSetup({
   onStart,
   defaultLevel = 4,
-  busy = false,
 }: {
   onStart: (config: StartConfig) => void;
   defaultLevel?: number;
-  busy?: boolean;
 }) {
   const [level, setLevel] = useState(defaultLevel);
   const [tcId, setTcId] = useState("5+3");
@@ -61,8 +56,8 @@ export default function GameSetup({
         return;
       }
       try {
-        // chess.js rejects anything it cannot play, including wrong kings, so
-        // the board can never open in an illegal position.
+        // chess.js rejects anything it cannot play — including a position with
+        // no king — so the board can never open from an illegal position.
         config.fen = new Chess(trimmed).fen();
       } catch {
         setError("That FEN is not a legal position chess.js can play.");
@@ -74,172 +69,152 @@ export default function GameSetup({
     onStart(config);
   }
 
-  const summary = [
-    `Level ${levelInfo.level} · ${levelInfo.name}`,
-    control.initial === null ? "no clock" : `${control.label} ${control.category}`,
-    colour === "random" ? "random colour" : colour,
-  ].join(" · ");
-
   return (
-    <div className="mx-auto flex w-full max-w-3xl flex-col gap-4">
-      {/* --- quick pairing: one click, straight into a game --------------- */}
-      <section className="rounded-xl border border-[var(--line)] bg-[var(--panel)] p-4">
-        <div className="mb-3 flex flex-wrap items-baseline justify-between gap-2">
-          <h2 className="text-[11px] font-medium uppercase tracking-wider text-[var(--muted)]">
-            Quick pairing
-          </h2>
-          <span className="text-[11px] text-[var(--muted)]">
-            Level {levelInfo.level} · {levelInfo.name} · random colour
-          </span>
-        </div>
+    <div className="flex w-full flex-col gap-4">
+      {/* One-click pairings: the Lichess shortcut, kept visually separate so
+          nobody has to scroll through options to get a game going. */}
+      <section>
+        <h2 className="mb-2 text-[11px] font-medium uppercase tracking-wider text-[var(--muted)]">
+          Quick pairing · one click starts
+        </h2>
         <div className="grid grid-cols-3 gap-2 sm:grid-cols-6">
           {QUICK.map((id) => {
-            const entry = timeControlById(id);
+            const tc = timeControlById(id);
             return (
               <button
                 key={id}
                 onClick={() =>
-                  start({ level, tcId: id, colour: "random", mode: "standard" })
+                  start({ tcId: id, colour: "random", mode: "standard", fen: null })
                 }
-                disabled={busy}
-                className="flex flex-col items-center rounded-lg border border-[var(--line)] px-2 py-2.5 transition hover:border-[var(--accent)] hover:bg-[var(--panel-2)] disabled:opacity-40"
+                className="flex flex-col items-center gap-0.5 rounded-lg border border-[var(--line)] bg-[var(--panel)] px-2 py-3 transition hover:border-[var(--accent)] hover:bg-[var(--panel-2)]"
               >
-                <span className="font-mono text-sm">
-                  {entry.initial === null ? "∞" : entry.label}
+                <span className="font-mono text-base">
+                  {tc.initial === null ? "∞" : tc.label.replace(/ /g, "")}
                 </span>
-                <span className="mt-0.5 text-[10px] uppercase tracking-wide text-[var(--muted)]">
-                  {entry.category}
+                <span className="text-[10px] uppercase tracking-wide text-[var(--muted)]">
+                  {tc.category}
                 </span>
               </button>
             );
           })}
         </div>
+        <p className="mt-2 text-[11px] text-[var(--muted)]">
+          Starts instantly as Club (L4, ≈1600) with a random colour. Want a
+          different opponent or clock? Use the form below.
+        </p>
       </section>
 
-      {/* --- custom game: every option, start button in the header -------- */}
+      {/* The custom game form: every option on one screen, one primary button. */}
       <section className="rounded-xl border border-[var(--line)] bg-[var(--panel)]">
-        <header className="flex flex-wrap items-center justify-between gap-3 border-b border-[var(--line)] px-4 py-3">
-          <div className="min-w-0">
-            <h2 className="text-[11px] font-medium uppercase tracking-wider text-[var(--muted)]">
-              Custom game
-            </h2>
-            <p className="mt-0.5 truncate text-sm">{summary}</p>
-          </div>
-          <button
-            onClick={() => start()}
-            disabled={busy}
-            className="rounded-lg bg-[var(--accent)] px-4 py-2 text-sm font-semibold text-[#0b1602] transition hover:brightness-110 disabled:opacity-50"
-          >
-            Start game →
-          </button>
-        </header>
+        <div className="border-b border-[var(--line)] px-5 py-3">
+          <h2 className="text-sm font-medium">New game</h2>
+          <p className="mt-0.5 text-[11px] text-[var(--muted)]">
+            {levelInfo.name} · {levelInfo.rating} Elo ·{" "}
+            {control.initial === null ? "no clock" : `${control.label} ${control.category}`} ·{" "}
+            {colour === "random" ? "random colour" : colour}
+            {mode === "custom" ? " · from a position" : ""}
+          </p>
+        </div>
 
-        <div className="grid gap-5 p-4 sm:grid-cols-2">
-          {/* opponent */}
-          <div>
-            <h3 className="mb-2 text-[11px] uppercase tracking-wider text-[var(--muted)]">
-              Opponent
-            </h3>
-            <div className="grid grid-cols-2 gap-1.5">
+        <div className="flex flex-col gap-5 px-5 py-4">
+          <Row label="Opponent">
+            <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
               {ENGINE_LEVELS.map((entry) => {
                 const active = entry.level === level;
                 return (
                   <button
                     key={entry.level}
                     onClick={() => setLevel(entry.level)}
-                    className="flex items-center justify-between rounded-lg border px-2.5 py-1.5 text-left transition"
+                    className="rounded-lg border px-2.5 py-2 text-left transition"
                     style={{
                       borderColor: active ? "var(--accent)" : "var(--line)",
                       background: active ? "var(--panel-2)" : "transparent",
                     }}
                   >
-                    <span className="text-xs font-medium">{entry.name}</span>
-                    <span className="font-mono text-[10px] text-[var(--muted)]">
+                    <span className="block text-xs font-medium">
+                      {entry.name}
+                    </span>
+                    <span className="mt-0.5 block font-mono text-[10px] text-[var(--muted)]">
                       L{entry.level} · {entry.rating}
                     </span>
                   </button>
                 );
               })}
             </div>
-            <p className="mt-2 text-[11px] leading-relaxed text-[var(--muted)]">
-              {levelInfo.blurb} Ratings are rough, not measurements.
-            </p>
-          </div>
+          </Row>
 
-          <div className="flex flex-col gap-4">
-            {/* clock */}
-            <div>
-              <h3 className="mb-2 text-[11px] uppercase tracking-wider text-[var(--muted)]">
-                Time control
-              </h3>
-              <div className="flex flex-col gap-1.5">
-                {CATEGORIES.map((category) => {
-                  const entries = TIME_CONTROLS.filter(
-                    (entry: TimeControl) => entry.category === category,
-                  );
-                  if (entries.length === 0) return null;
-                  return (
-                    <div key={category} className="flex items-center gap-2">
-                      <span className="w-16 shrink-0 text-[10px] text-[var(--muted)]">
-                        {category}
-                      </span>
-                      <div className="flex flex-wrap gap-1.5">
-                        {entries.map((entry) => {
-                          const active = entry.id === tcId;
-                          return (
-                            <button
-                              key={entry.id}
-                              onClick={() => setTcId(entry.id)}
-                              className="rounded-md border px-2 py-1 font-mono text-[11px] transition"
-                              style={{
-                                borderColor: active ? "var(--accent)" : "var(--line)",
-                                background: active ? "var(--panel-2)" : "transparent",
-                                color: active ? "var(--text)" : "var(--muted)",
-                              }}
-                            >
-                              {entry.label}
-                            </button>
-                          );
-                        })}
-                      </div>
-                    </div>
-                  );
-                })}
+          <Row label="Time">
+            <div className="flex flex-col gap-2">
+              {GROUPS.map((group) => (
+                <div key={group} className="flex flex-wrap items-center gap-1.5">
+                  <span className="w-16 shrink-0 text-[10px] uppercase tracking-wide text-[var(--muted)]">
+                    {group}
+                  </span>
+                  {TIME_CONTROLS.filter((entry) => entry.category === group).map(
+                    (entry) => {
+                      const active = entry.id === tcId;
+                      return (
+                        <button
+                          key={entry.id}
+                          onClick={() => setTcId(entry.id)}
+                          className="rounded-md border px-2.5 py-1 font-mono text-xs transition"
+                          style={{
+                            borderColor: active ? "var(--accent)" : "var(--line)",
+                            background: active ? "var(--panel-2)" : "transparent",
+                            color: active ? "var(--text)" : "var(--muted)",
+                          }}
+                        >
+                          {entry.label}
+                        </button>
+                      );
+                    },
+                  )}
+                </div>
+              ))}
+              <div className="flex flex-wrap items-center gap-1.5">
+                <span className="w-16 shrink-0 text-[10px] uppercase tracking-wide text-[var(--muted)]">
+                  Untimed
+                </span>
+                <button
+                  onClick={() => setTcId("unlimited")}
+                  className="rounded-md border px-2.5 py-1 font-mono text-xs transition"
+                  style={{
+                    borderColor:
+                      tcId === "unlimited" ? "var(--accent)" : "var(--line)",
+                    background: tcId === "unlimited" ? "var(--panel-2)" : "transparent",
+                    color: tcId === "unlimited" ? "var(--text)" : "var(--muted)",
+                  }}
+                >
+                  no clock
+                </button>
               </div>
             </div>
+          </Row>
 
-            {/* colour */}
-            <div>
-              <h3 className="mb-2 text-[11px] uppercase tracking-wider text-[var(--muted)]">
-                You play
-              </h3>
-              <div className="grid grid-cols-3 gap-1.5">
-                {(["white", "random", "black"] as const).map((option) => {
-                  const active = colour === option;
-                  return (
-                    <button
-                      key={option}
-                      onClick={() => setColour(option)}
-                      className="rounded-lg border px-2 py-1.5 text-xs capitalize transition"
-                      style={{
-                        borderColor: active ? "var(--accent)" : "var(--line)",
-                        background: active ? "var(--panel-2)" : "transparent",
-                        color: active ? "var(--text)" : "var(--muted)",
-                      }}
-                    >
-                      {option}
-                    </button>
-                  );
-                })}
-              </div>
+          <Row label="Colour">
+            <div className="grid max-w-sm grid-cols-3 gap-2">
+              {(["white", "random", "black"] as const).map((option) => {
+                const active = colour === option;
+                return (
+                  <button
+                    key={option}
+                    onClick={() => setColour(option)}
+                    className="rounded-lg border px-2 py-2 text-xs capitalize transition"
+                    style={{
+                      borderColor: active ? "var(--accent)" : "var(--line)",
+                      background: active ? "var(--panel-2)" : "transparent",
+                    }}
+                  >
+                    {option}
+                  </button>
+                );
+              })}
             </div>
+          </Row>
 
-            {/* start position */}
-            <div>
-              <h3 className="mb-2 text-[11px] uppercase tracking-wider text-[var(--muted)]">
-                Start position
-              </h3>
-              <div className="grid grid-cols-2 gap-1.5">
+          <Row label="Start">
+            <div className="flex flex-col gap-2">
+              <div className="flex gap-2">
                 {(["standard", "custom"] as const).map((option) => {
                   const active = mode === option;
                   return (
@@ -249,14 +224,14 @@ export default function GameSetup({
                         setMode(option);
                         setError(null);
                       }}
-                      className="rounded-lg border px-2 py-1.5 text-xs transition"
+                      className="rounded-lg border px-3 py-1.5 text-xs transition"
                       style={{
                         borderColor: active ? "var(--accent)" : "var(--line)",
                         background: active ? "var(--panel-2)" : "transparent",
                         color: active ? "var(--text)" : "var(--muted)",
                       }}
                     >
-                      {option === "standard" ? "Standard" : "From a FEN"}
+                      {option === "standard" ? "Standard position" : "From a FEN"}
                     </button>
                   );
                 })}
@@ -268,15 +243,33 @@ export default function GameSetup({
                   rows={2}
                   spellCheck={false}
                   placeholder="8/8/8/4k3/8/8/4P3/4K3 w - - 0 1"
-                  className="mt-1.5 w-full rounded-lg border border-[var(--line)] bg-[var(--bg)] px-2 py-1.5 font-mono text-[11px] outline-none focus:border-[var(--accent)]"
+                  className="w-full rounded-lg border border-[var(--line)] bg-[var(--bg)] px-2 py-1.5 font-mono text-[11px] outline-none focus:border-[var(--accent)]"
                 />
               )}
             </div>
-          </div>
-        </div>
+          </Row>
 
-        {error && <p className="px-4 pb-3 text-xs text-[#e0564b]">{error}</p>}
+          {error && <p className="text-xs text-[#e0564b]">{error}</p>}
+
+          <button
+            onClick={() => start()}
+            className="w-full rounded-lg bg-[var(--accent)] px-4 py-3 text-sm font-semibold text-[#0b1602] transition hover:brightness-110"
+          >
+            Start game
+          </button>
+        </div>
       </section>
+    </div>
+  );
+}
+
+function Row({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <div className="grid gap-2 sm:grid-cols-[64px_minmax(0,1fr)] sm:items-start">
+      <span className="pt-1.5 text-[11px] font-medium uppercase tracking-wider text-[var(--muted)]">
+        {label}
+      </span>
+      {children}
     </div>
   );
 }
