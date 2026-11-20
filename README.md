@@ -19,7 +19,14 @@ code (`B90`) or move sequence (`1.e4 c5`), each previewable on a board.
 
 ### Playing the engine
 
-Before the first move you set three things, the way a Lichess challenge screen does:
+**Play** (`/play`, in the nav) is the front door: a *quick pairing* row that
+drops you into a game in one click — 1+0, 3+0, 3+2, 5+3, 10+0, or no clock, at
+the currently selected level — and a *custom game* card whose **Start game**
+button sits in its header, so it is visible before you scroll. The same screen
+is reachable from each repertoire's Play tab, when you want to face the engine
+from that repertoire's colours.
+
+Every game starts from the same three decisions:
 
 | Setting | What it does |
 |---|---|
@@ -104,7 +111,7 @@ comments are sample content.
 
 | New game: level, clock, start |
 |---|
-| ![Setup](docs/screenshots/setup.png) |
+| ![Setup](docs/screenshots/setup.png) | ![Home](docs/screenshots/home.png) |
 
 ---
 

@@ -85,14 +85,14 @@ export default async function GamesPage() {
       {games.length === 0 ? (
         <div className="rounded-xl border border-dashed border-[var(--line)] p-10 text-center">
           <p className="text-sm text-[var(--muted)]">
-            No games yet. Open a repertoire → Play, finish a game (mate or resign),
-            and it lands here.
+            No games yet. Hit Play, finish a game (mate, resign or flag), and it
+            lands here.
           </p>
           <Link
-            href="/"
+            href="/play"
             className="mt-4 inline-block rounded-lg bg-[var(--accent)] px-3 py-2 text-xs font-medium text-[#0b1602]"
           >
-            Go to repertoires
+            Play Stockfish
           </Link>
         </div>
       ) : (
@@ -136,7 +136,8 @@ export default async function GamesPage() {
                   <span className="mt-0.5 block text-[11px] text-[var(--muted)]">
                     {game.playerColor === "white" ? "White" : "Black"} ·{" "}
                     {game.timeControl === "unlimited" ? "no clock" : game.timeControl} ·{" "}
-                    {Math.ceil(game.plies / 2)} moves ·{" "}
+                    {Math.ceil(game.plies / 2)}{" "}
+                    {Math.ceil(game.plies / 2) === 1 ? "move" : "moves"} ·{" "}
                     {new Intl.DateTimeFormat("en-GB", {
                       dateStyle: "medium",
                       timeStyle: "short",

@@ -20,12 +20,13 @@ type Phase = "setup" | "game";
 
 export default function PlayVsEngine({
   repertoireId,
-  name,
-  side,
+  name = "Play",
+  side = "white",
 }: {
-  repertoireId: string;
-  name: string;
-  side: "white" | "black";
+  /** Set when playing from a repertoire's Play tab; absent on /play. */
+  repertoireId?: string;
+  name?: string;
+  side?: "white" | "black";
 }) {
   const [phase, setPhase] = useState<Phase>("setup");
 
@@ -395,18 +396,20 @@ export default function PlayVsEngine({
             href="/"
             className="text-xs text-[var(--muted)] transition-colors hover:text-[var(--text)]"
           >
-            ← All repertoires
+            {repertoireId ? "← All repertoires" : "← Home"}
           </Link>
-          <h1 className="mt-1 text-2xl font-semibold tracking-tight">{name}</h1>
+          <h1 className="mt-1 text-2xl font-semibold tracking-tight">
+            {repertoireId ? name : "Play"}
+          </h1>
           <p className="text-sm text-[var(--muted)]">
             {phase === "game"
               ? `vs Stockfish · ${levelInfo.name} (≈${levelInfo.rating}) · ${
                   clockOn ? `${timeControl.label} ${timeControl.category}` : "no clock"
                 }${startFen === START_FEN ? "" : " · custom position"}`
-              : "New game — pick an opponent, a clock and a start"}
+              : "Create a game — quick pairing, or set every option yourself"}
           </p>
         </div>
-        <ModeTabs repertoireId={repertoireId} active="play" />
+        {repertoireId ? <ModeTabs repertoireId={repertoireId} active="play" /> : null}
       </header>
 
       {phase === "setup" ? (
@@ -542,7 +545,9 @@ export default function PlayVsEngine({
                 <p className="mt-1 text-sm font-medium">{result}</p>
                 {moves.length > 0 && (
                   <p className="mt-1 text-xs text-[var(--muted)]">
-                    {Math.ceil(moves.length / 2)} moves · Stockfish {levelInfo.name}
+                    {Math.ceil(moves.length / 2)}{" "}
+                    {Math.ceil(moves.length / 2) === 1 ? "move" : "moves"} · Stockfish{" "}
+                    {levelInfo.name}
                     {clockOn ? ` · ${timeControl.label}` : ""}
                   </p>
                 )}
