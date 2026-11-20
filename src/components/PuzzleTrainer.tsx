@@ -53,10 +53,15 @@ export default function PuzzleTrainer({
     async (solved: boolean) => {
       if (reported.current) return;
       reported.current = true;
-      const next = await submitPuzzleAttempt({ puzzleId: puzzle.id, solved });
-      setStats(next);
-      setDelta(next.lastDelta);
-      window.setTimeout(() => setDelta(null), 5000);
+      // A failed write should never take the page down mid-drag.
+      try {
+        const next = await submitPuzzleAttempt({ puzzleId: puzzle.id, solved });
+        setStats(next);
+        setDelta(next.lastDelta);
+        window.setTimeout(() => setDelta(null), 5000);
+      } catch {
+        reported.current = false;
+      }
     },
     [puzzle.id],
   );
@@ -207,6 +212,8 @@ export default function PuzzleTrainer({
       board.current = new Chess(fresh.puzzle.fen);
       setPosition(fresh.puzzle.fen);
       reported.current = false;
+    } catch {
+      // Keep the current puzzle on screen instead of surfacing an error.
     } finally {
       setLoading(false);
     }
