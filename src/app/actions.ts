@@ -614,11 +614,35 @@ async function cacheLichessDaily(day: string): Promise<DbPuzzle | null> {
       if (!move) return null;
     }
 
-    return await prisma.puzzle.upsert({
-      where: { day },
-      update: {},
-      create: {
-        id: `lichess-${puzzle.id}`,
+    const id = `lichess-${puzzle.id}`;
+    const existing = await prisma.puzzle.findUnique({
+      where: { id },
+      select: { id: true },
+    });
+
+    if (existing) {
+      // Lichess keeps serving the same puzzle for a while (the endpoint is
+      // published once and reused), so the same puzzle id can arrive on a new
+      // day. Keying an upsert on `day` made that a primary-key collision and
+      // the daily puzzle silently degraded to a seed puzzle; re-date instead.
+      return await prisma.puzzle.update({
+        where: { id },
+        data: { day },
+        select: {
+          id: true,
+          fen: true,
+          solution: true,
+          rating: true,
+          themes: true,
+          title: true,
+          source: true,
+        },
+      });
+    }
+
+    return await prisma.puzzle.create({
+      data: {
+        id,
         fen,
         solution: puzzle.solution.join(" "),
         rating: puzzle.rating ?? 1500,

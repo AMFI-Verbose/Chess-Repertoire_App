@@ -5,6 +5,7 @@ import { usePathname } from "next/navigation";
 
 const LINKS = [
   { href: "/", label: "Repertoires" },
+  { href: "/play", label: "Play" },
   { href: "/openings", label: "Openings" },
   { href: "/puzzles", label: "Puzzles" },
   { href: "/games", label: "Games" },
@@ -28,10 +29,12 @@ export default function AppNav() {
 
         <div className="ml-auto flex items-center gap-1 text-sm">
           {LINKS.map((link) => {
+            // Exact-segment matching: plain startsWith would make "/play"
+            // match "/puzzles" as well.
             const active =
               link.href === "/"
                 ? pathname === "/" || pathname.startsWith("/r/")
-                : pathname.startsWith(link.href);
+                : pathname === link.href || pathname.startsWith(`${link.href}/`);
             return (
               <Link
                 key={link.href}

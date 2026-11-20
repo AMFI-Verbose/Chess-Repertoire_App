@@ -56,7 +56,6 @@ export default async function DashboardPage() {
     { label: "Repertoires", value: repertoires.length },
     { label: "Puzzle rating", value: profile?.puzzleRating ?? 1500 },
     { label: "Puzzles solved", value: solvedPuzzles },
-    { label: "Solve streak", value: streak },
     { label: "Games vs engine", value: gameCount },
   ];
   void studyCount;
@@ -75,9 +74,23 @@ export default async function DashboardPage() {
           diverge, keep a note on every position — then test them against
           Stockfish and grade every move in review.
         </p>
+        <div className="mt-5 flex flex-wrap gap-2">
+          <Link
+            href="/play"
+            className="rounded-lg bg-[var(--accent)] px-4 py-2 text-sm font-semibold text-[#0b1602] transition hover:brightness-110"
+          >
+            Play Stockfish →
+          </Link>
+          <Link
+            href="/games"
+            className="rounded-lg border border-[var(--line)] px-4 py-2 text-sm transition hover:border-[var(--accent)]"
+          >
+            Your games
+          </Link>
+        </div>
       </header>
 
-      <div className="mb-8 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
+      <div className="mb-8 grid grid-cols-2 gap-3 sm:grid-cols-4">
         {stats.map((stat) => (
           <div
             key={stat.label}
@@ -117,7 +130,9 @@ export default async function DashboardPage() {
           <span className="min-w-0 flex-1">
             <span className="block font-medium">Daily puzzle</span>
             <span className="mt-0.5 block text-xs text-[var(--muted)]">
-              Fresh tactic every day, plus practice
+              {streak > 0
+                ? `Daily tactic · ${streak} solved in a row`
+                : "Daily tactic, plus practice"}
             </span>
           </span>
         </Link>
@@ -238,7 +253,8 @@ export default async function DashboardPage() {
                       </span>
                       <span className="min-w-0 flex-1 truncate text-xs">
                         vs Stockfish · L{game.level} · {game.timeControl} ·{" "}
-                        {Math.ceil(game.plies / 2)} moves
+                        {Math.ceil(game.plies / 2)}{" "}
+                        {Math.ceil(game.plies / 2) === 1 ? "move" : "moves"}
                       </span>
                       <span className="shrink-0 text-[11px] text-[var(--muted)]">
                         {new Intl.DateTimeFormat("en-GB", { dateStyle: "short" }).format(
