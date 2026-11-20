@@ -95,6 +95,9 @@ model Puzzle {
   day       String?         @unique // "2026-11-19" for that day's puzzle
   createdAt DateTime        @default(now())
   attempts  PuzzleAttempt[]
+
+  // Selection is always "puzzles near my rating", so the band must be indexed.
+  @@index([rating])
 }
 
 model PuzzleAttempt {

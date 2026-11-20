@@ -11,7 +11,8 @@ import {
   type PuzzleDTO,
   type PuzzleStats,
 } from "@/app/actions";
-import { DARK_SQUARE, LIGHT_SQUARE, squaresOf, tint } from "@/lib/boardTheme";
+import { DARK_SQUARE, LIGHT_SQUARE } from "@/lib/boardTheme";
+import { hintStyles } from "@/lib/boardHints";
 import { expectedScore } from "@/lib/elo";
 import { play } from "@/lib/sound";
 
@@ -40,6 +41,7 @@ export default function PuzzleTrainer({
   const [lastMove, setLastMove] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [delta, setDelta] = useState<number | null>(null);
+  const [selected, setSelected] = useState<string | null>(null);
 
   // A mutable board that mirrors whatever is on screen.
   const board = useRef(new Chess(initial.fen));
@@ -100,15 +102,9 @@ export default function PuzzleTrainer({
   // Leaving the page mid-reply should not leave a timer running.
   useEffect(() => () => cancelTimers(), [cancelTimers]);
 
-  function onDrop({
-    sourceSquare,
-    targetSquare,
-  }: {
-    piece: { pieceType: string };
-    sourceSquare: string;
-    targetSquare: string | null;
-  }) {
-    if (!targetSquare || status !== "solving" || loading) return false;
+  /** Validate and commit one attempt. Returns false for anything illegal. */
+  function tryMove(sourceSquare: string, targetSquare: string): boolean {
+    if (status !== "solving" || loading) return false;
     if (board.current.turn() !== (solverPlays === "white" ? "w" : "b")) return false;
 
     const uci = `${sourceSquare}${targetSquare}`;
@@ -176,6 +172,46 @@ export default function PuzzleTrainer({
     return true;
   }
 
+  function onDrop({
+    sourceSquare,
+    targetSquare,
+  }: {
+    piece: { pieceType: string };
+    sourceSquare: string;
+    targetSquare: string | null;
+  }) {
+    setSelected(null);
+    if (!targetSquare) return false;
+    return tryMove(sourceSquare, targetSquare);
+  }
+
+  /** Click-to-move: pick a piece, then click its destination. */
+  function onSquareClick({ square }: { square: string }) {
+    if (status !== "solving") return;
+
+    if (selected === square) {
+      setSelected(null);
+      return;
+    }
+
+    if (selected) {
+      const moved = tryMove(selected, square);
+      setSelected(null);
+      if (moved) return;
+    }
+
+    // Selecting only your own pieces avoids dots on the opponent's side.
+    const ownTurn = board.current.turn() === (solverPlays === "white" ? "w" : "b");
+    if (!ownTurn) return;
+    const piece = board.current.get(square as never);
+    if (piece && piece.color === board.current.turn()) {
+      setSelected(square);
+      play("navigate");
+    } else {
+      setSelected(null);
+    }
+  }
+
   function reveal() {
     if (status === "solved" || status === "revealed") return;
     cancelTimers();
@@ -219,15 +255,15 @@ export default function PuzzleTrainer({
     }
   }
 
-  const squareStyles = useMemo(() => {
-    const styles: Record<string, { background?: string; backgroundImage?: string }> = {};
-    if (lastMove) {
-      for (const square of squaresOf(lastMove)) {
-        styles[square] = { backgroundImage: tint("rgba(155, 199, 0, 0.41)") };
-      }
-    }
-    return styles;
-  }, [lastMove]);
+  const squareStyles = useMemo(
+    () =>
+      hintStyles(position, {
+        selected,
+        lastMove,
+        legalMovesFor: selected,
+      }),
+    [position, selected, lastMove],
+  );
 
   const turn = board.current.turn();
   const themes = puzzle.themes.split(" ").filter(Boolean).slice(0, 4);
@@ -251,8 +287,19 @@ export default function PuzzleTrainer({
                 position,
                 boardOrientation: orientation,
                 onPieceDrop: onDrop,
+                onSquareClick: onSquareClick,
+                onPieceDrag: ({ square }) => {
+                  if (!square) return;
+                  const piece = board.current.get(square as never);
+                  const ownTurn =
+                    board.current.turn() === (solverPlays === "white" ? "w" : "b");
+                  if (piece && ownTurn && piece.color === board.current.turn()) {
+                    setSelected(square);
+                  }
+                },
+                onPieceDragCancel: () => setSelected(null),
                 squareStyles,
-                animationDurationInMs: 200,
+                animationDurationInMs: 280,
                 lightSquareStyle: LIGHT_SQUARE,
                 darkSquareStyle: DARK_SQUARE,
               }}
@@ -301,6 +348,7 @@ export default function PuzzleTrainer({
             <button
               onClick={() => {
                 cancelTimers();
+                setSelected(null);
                 setStatus("solving");
                 setStep(0);
                 setLastMove(null);

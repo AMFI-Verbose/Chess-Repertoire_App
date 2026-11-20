@@ -8,13 +8,8 @@ import { Chess } from "chess.js";
 import ModeTabs from "@/components/ModeTabs";
 import { Engine } from "@/lib/engine";
 import { START_FEN, tryMove, turnOf } from "@/lib/chess";
-import {
-  DARK_SQUARE,
-  LIGHT_SQUARE,
-  LAST_MOVE,
-  squareTint,
-  squaresOf,
-} from "@/lib/boardTheme";
+import { DARK_SQUARE, LIGHT_SQUARE } from "@/lib/boardTheme";
+import { hintStyles } from "@/lib/boardHints";
 import { play } from "@/lib/sound";
 
 type Status = "playing" | "ended";
@@ -39,6 +34,7 @@ export default function PlayVsEngine({
   const [youPlay, setYouPlay] = useState<"w" | "b">(side === "black" ? "b" : "w");
   const [skill, setSkill] = useState(12);
   const [thinking, setThinking] = useState(false);
+  const [selected, setSelected] = useState<string | null>(null);
   const [status, setStatus] = useState<Status>("playing");
   const [result, setResult] = useState<string | null>(null);
   const [showEval, setShowEval] = useState(true);
@@ -157,11 +153,38 @@ export default function PlayVsEngine({
     sourceSquare: string;
     targetSquare: string | null;
   }) {
+    setSelected(null);
     if (!targetSquare) return false;
     if (status !== "playing") return false;
     if (thinking) return false;
     if (turnOf(fen) !== youPlay) return false;
     return commitMove(sourceSquare, targetSquare);
+  }
+
+  /** chess.com behaviour: click a piece, then click its destination. */
+  function onSquareClick({ square }: { square: string }) {
+    if (status !== "playing" || thinking) return;
+    if (turnOf(fen) !== youPlay) return;
+
+    if (selected === square) {
+      setSelected(null);
+      return;
+    }
+
+    if (selected) {
+      const moved = commitMove(selected, square);
+      setSelected(null);
+      if (moved) return;
+    }
+
+    const board = new Chess(fen);
+    const piece = board.get(square as never);
+    if (piece && piece.color === board.turn()) {
+      setSelected(square);
+      play("navigate");
+    } else {
+      setSelected(null);
+    }
   }
 
   function undo() {
@@ -195,12 +218,14 @@ export default function PlayVsEngine({
   }
 
   const lastMove = moves.length > 0 ? moves[moves.length - 1].uci : null;
-  const highlighted = lastMove ? squaresOf(lastMove) : [];
 
-  const squareStyles: Record<string, Record<string, string>> = {};
-  for (const square of highlighted) {
-    squareStyles[square] = { backgroundImage: squareTint(LAST_MOVE, 0.41) };
-  }
+  // Shared affordances: legal-move dots, selected square, checked king,
+  // plus the last-move tint this board already had.
+  const squareStyles = hintStyles(fen, {
+    selected,
+    lastMove,
+    legalMovesFor: selected,
+  });
 
   // Eval bar: 0 cp = half, ±1000 cp saturates.
   const whiteShare =
@@ -233,8 +258,16 @@ export default function PlayVsEngine({
                 position: fen,
                 boardOrientation: youPlay === "w" ? "white" : "black",
                 onPieceDrop: onDrop,
+                onSquareClick: onSquareClick,
+                onPieceDrag: ({ square }) => {
+                  if (!square) return;
+                  const board = new Chess(fen);
+                  const piece = board.get(square as never);
+                  if (piece && piece.color === board.turn()) setSelected(square);
+                },
+                onPieceDragCancel: () => setSelected(null),
                 squareStyles,
-                animationDurationInMs: 180,
+                animationDurationInMs: 280,
                 lightSquareStyle: LIGHT_SQUARE,
                 darkSquareStyle: DARK_SQUARE,
               }}
