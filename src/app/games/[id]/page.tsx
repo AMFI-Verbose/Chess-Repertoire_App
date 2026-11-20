@@ -10,10 +10,14 @@ export const dynamic = "force-dynamic";
 
 export default async function GamePage({
   params,
+  searchParams,
 }: {
   params: Promise<{ id: string }>;
+  searchParams: Promise<{ ply?: string }>;
 }) {
   const { id } = await params;
+  const { ply } = await searchParams;
+  const initialPly = Math.max(0, Math.min(Number.parseInt(ply ?? "0", 10) || 0, 500));
 
   const game = await prisma.game.findUnique({ where: { id } });
   if (!game) notFound();
@@ -64,6 +68,7 @@ export default async function GamePage({
       gameId={game.id}
       bookPlies={bookPlies}
       startFen={game.startFen || START_FEN}
+      initialPly={initialPly}
       extra={
         <div className="flex flex-col gap-2">
           <div

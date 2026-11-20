@@ -64,6 +64,7 @@ export default function ReviewSequence({
   gameId,
   extra = null,
   startFen = START_FEN,
+  initialPly = 0,
 }: {
   moves: ReviewMove[];
   orientation: "white" | "black";
@@ -79,14 +80,20 @@ export default function ReviewSequence({
   extra?: ReactNode;
   /** Position the game began in — a game can start from a custom FEN. */
   startFen?: string;
+  /** Deep link: ?ply=6 opens the review already on the sixth move. */
+  initialPly?: number;
 }) {
   const [grades, setGrades] = useState<(MoveLabel | null)[]>([]);
   const [summary, setSummary] = useState<ReviewSummary | null>(null);
   const [progress, setProgress] = useState(0);
   const [analysing, setAnalysing] = useState(true);
-  const [at, setAt] = useState(0); // how many plies are on the board
+  const [at, setAt] = useState(Math.max(0, Math.min(initialPly, moves.length))); // plies shown
   const [autoPlay, setAutoPlay] = useState(false);
   const [flash, setFlash] = useState<{ label: MoveLabel; id: number } | null>(null);
+  /** Eval after every position, white's point of view (mates are ±9990). */
+  const [evals, setEvals] = useState<number[]>([]);
+  /** The engine's own choice for each move — what "better" should have been. */
+  const [bestUci, setBestUci] = useState<(string | null)[]>([]);
 
   const engineRef = useRef<Engine | null>(null);
 
@@ -128,7 +135,20 @@ export default function ReviewSequence({
 
       if (cancelled) return;
 
+      // White's point of view after every position, powering the eval graph.
+      // Stockfish reports from the side to move, so flip where black moved.
+      const startTurn = new Chess(startFen).turn();
+      const evalsWhite: number[] = [];
+      for (let index = 0; index < positions.length; index += 1) {
+        const cp = scoreToCp(results[index]?.lines[0], true);
+        const stm =
+          index % 2 === 0 ? startTurn : startTurn === "w" ? "b" : "w";
+        const white = cp === null ? null : stm === "w" ? cp : -cp;
+        evalsWhite.push(white ?? evalsWhite[index - 1] ?? 0);
+      }
+
       const graded: MoveLabel[] = [];
+      const bestUcis: (string | null)[] = [];
       const counts: Record<string, number> = {};
       const losses: { w: number[]; b: number[] } = { w: [], b: [] };
       const accuracies: { w: number[]; b: number[] } = { w: [], b: [] };
@@ -163,6 +183,11 @@ export default function ReviewSequence({
           isMate = false;
         }
 
+        if (isMate) {
+          // Mate has no "position after" to evaluate: record it as a win.
+          evalsWhite[index + 1] = mover === "w" ? 9990 : -9990;
+        }
+
         const label = isMate
           ? shedMaterial
             ? "brilliant"
@@ -177,6 +202,7 @@ export default function ReviewSequence({
             });
 
         graded.push(label);
+        bestUcis.push(bestUci);
         counts[label] = (counts[label] ?? 0) + 1;
 
         // Accuracy needs both ends of the move; book moves have no evaluative
@@ -199,6 +225,8 @@ export default function ReviewSequence({
 
       if (cancelled) return;
       setGrades(graded);
+      setBestUci(bestUcis);
+      setEvals(evalsWhite);
       setSummary(verdict);
       setAnalysing(false);
 
@@ -275,6 +303,13 @@ export default function ReviewSequence({
   const currentLabel = at > 0 ? grades[at - 1] : null;
   const style = currentLabel ? LABEL_STYLES[currentLabel] : null;
 
+  const lastMove = at > 0 ? moves[at - 1] : null;
+  const badgeSquare = lastMove ? lastMove.uci.slice(2, 4) : null;
+  const bestForMove = at > 0 ? bestUci[at - 1] : null;
+  const showBest =
+    Boolean(lastMove && bestForMove && bestForMove !== lastMove.uci) &&
+    ["inaccuracy", "mistake", "blunder"].includes(currentLabel ?? "");
+
   const squareStyles: Record<string, Record<string, string>> = {};
   if (at > 0 && style) {
     for (const square of squaresOf(moves[at - 1].uci)) {
@@ -323,6 +358,34 @@ export default function ReviewSequence({
               />
             </div>
 
+            {at > 0 && style && badgeSquare && (
+              <div
+                className="pointer-events-none absolute z-10"
+                style={{
+                  left: `${squareXY(badgeSquare, orientation).x + 12.5}%`,
+                  top: `${squareXY(badgeSquare, orientation).y}%`,
+                  transform: "translate(-100%, 0)",
+                  paddingTop: 2,
+                  paddingRight: 2,
+                }}
+              >
+                <span
+                  className="rounded-[4px] px-1 text-[11px] font-bold leading-[15px] shadow"
+                  style={{ background: style.color, color: style.text }}
+                >
+                  {style.glyph || "•"}
+                </span>
+              </div>
+            )}
+
+            {showBest && bestForMove && (
+              <BestArrow
+                from={bestForMove.slice(0, 2)}
+                to={bestForMove.slice(2, 4)}
+                orientation={orientation}
+              />
+            )}
+
             {flash && (
               <div
                 key={flash.id}
@@ -365,7 +428,31 @@ export default function ReviewSequence({
             <span className="ml-2 font-mono text-xs text-[var(--muted)]">
               {at} / {moves.length}
             </span>
+            {evals.length > 0 && (
+              <span className="ml-3 rounded border border-[var(--line)] px-1.5 py-0.5 font-mono text-[11px] text-[var(--text)]">
+                {formatEval(evals[at] ?? null)}
+              </span>
+            )}
           </div>
+
+          {!analysing && moves.length > 1 && evals.length > 1 && (
+            <EvalGraph
+              evals={evals}
+              grades={grades}
+              at={at}
+              onJump={goTo}
+            />
+          )}
+
+          {!analysing && showBest && bestForMove && (
+            <p className="text-[11px] text-[var(--muted)]">
+              Better was{" "}
+              <strong className="text-[var(--text)]">
+                {sanOf(positions[at - 1], bestForMove)}
+              </strong>{" "}
+              — the green arrow shows it.
+            </p>
+          )}
 
           {analysing ? (
             <div className="w-full max-w-[600px]">
@@ -455,6 +542,7 @@ export default function ReviewSequence({
                       <MoveChip
                         san={row.white.san}
                         label={grades[row.white.index]}
+                        evalCp={evals[row.white.index + 1] ?? null}
                         active={at === row.white.ply}
                         onClick={() => goTo(row.white.ply)}
                       />
@@ -462,6 +550,7 @@ export default function ReviewSequence({
                         <MoveChip
                           san={black.san}
                           label={grades[black.index]}
+                          evalCp={evals[black.index + 1] ?? null}
                           active={at === black.ply}
                           onClick={() => goTo(black.ply)}
                         />
@@ -473,11 +562,17 @@ export default function ReviewSequence({
             )}
           </div>
 
+          <p className="px-1 text-[10px] uppercase tracking-wider text-[var(--muted)]">
+            Stockfish 19 · 400 ms per position · MultiPV 2
+          </p>
+
           <p className="px-1 text-[11px] leading-relaxed text-[var(--muted)]">
-            Grading compares the move played against the engine&apos;s first choice.
-            &quot;Brilliant&quot; needs the best move <em>and</em> a sacrifice;
-            &quot;Great&quot; needs the best move to be clearly ahead of the second
-            choice. Use ← / → to walk the line.
+            Each move is graded against the engine&apos;s first choice; the badge
+            sits on the square the piece landed on, and the arrow points at the
+            move that should have been played. &quot;Brilliant&quot; needs the best
+            move <em>and</em> a sacrifice; &quot;Great&quot; needs the best move to
+            be clearly ahead of the second choice. Use ← / → to walk the line and
+            click a dot on the graph to jump to that move.
           </p>
         </aside>
       </div>
@@ -485,14 +580,199 @@ export default function ReviewSequence({
   );
 }
 
+/** Top-left corner of a square as a 0-100 percentage of the board. */
+function squareXY(square: string, orientation: "white" | "black") {
+  const file = square.charCodeAt(0) - 97;
+  const rank = Number(square[1]) - 1;
+  const col = orientation === "white" ? file : 7 - file;
+  const row = orientation === "white" ? 7 - rank : rank;
+  return { x: col * 12.5, y: row * 12.5 };
+}
+
+/** Centre of a square, in the same 0-100 space. */
+function centreXY(square: string, orientation: "white" | "black") {
+  const corner = squareXY(square, orientation);
+  return { x: corner.x + 6.25, y: corner.y + 6.25 };
+}
+
+/** "+0.3", "−1.2", or "+M2" for a forced mate. */
+function formatEval(cp: number | null): string {
+  if (cp === null) return "—";
+  if (Math.abs(cp) >= 9000) {
+    const mateIn = (10000 - Math.abs(cp)) / 10;
+    const sign = cp > 0 ? "+" : "−";
+    return `${sign}M${Math.max(1, Math.round(mateIn))}`;
+  }
+  const pawns = cp / 100;
+  if (Math.abs(pawns) < 0.05) return "0.0";
+  return `${pawns > 0 ? "+" : "−"}${Math.abs(pawns).toFixed(1)}`;
+}
+
+/** UCI → SAN in a given position, for "better was …". */
+function sanOf(fen: string, uci: string): string {
+  try {
+    const board = new Chess(fen);
+    const move = board.move({
+      from: uci.slice(0, 2),
+      to: uci.slice(2, 4),
+      promotion: uci.slice(4) || undefined,
+    });
+    return move?.san ?? uci;
+  } catch {
+    return uci;
+  }
+}
+
+/** The engine's suggestion, drawn as a green arrow across the board. */
+function BestArrow({
+  from,
+  to,
+  orientation,
+}: {
+  from: string;
+  to: string;
+  orientation: "white" | "black";
+}) {
+  const a = centreXY(from, orientation);
+  const b = centreXY(to, orientation);
+  const angle = Math.atan2(b.y - a.y, b.x - a.x);
+  const head = 3.4;
+  const p1 = {
+    x: b.x - head * Math.cos(angle - 0.55),
+    y: b.y - head * Math.sin(angle - 0.55),
+  };
+  const p2 = {
+    x: b.x - head * Math.cos(angle + 0.55),
+    y: b.y - head * Math.sin(angle + 0.55),
+  };
+
+  return (
+    <svg
+      viewBox="0 0 100 100"
+      preserveAspectRatio="none"
+      className="pointer-events-none absolute inset-0 z-10"
+    >
+      <line
+        x1={a.x}
+        y1={a.y}
+        x2={b.x}
+        y2={b.y}
+        stroke="#81b64c"
+        strokeWidth={2.2}
+        opacity={0.9}
+      />
+      <polygon
+        points={`${b.x},${b.y} ${p1.x},${p1.y} ${p2.x},${p2.y}`}
+        fill="#81b64c"
+        opacity={0.9}
+      />
+    </svg>
+  );
+}
+
+const GRAPH_DOTS: MoveLabel[] = [
+  "brilliant",
+  "great",
+  "inaccuracy",
+  "mistake",
+  "blunder",
+];
+
+/** White's advantage over the whole game; click anywhere to jump there. */
+function EvalGraph({
+  evals,
+  grades,
+  at,
+  onJump,
+}: {
+  evals: number[];
+  grades: (MoveLabel | null)[];
+  at: number;
+  onJump: (ply: number) => void;
+}) {
+  const total = evals.length - 1; // plies represented by the graph
+  if (total < 1) return null;
+
+  const x = (index: number) => (index / total) * 100;
+  const y = (cp: number) => 50 - ((winPercent(cp) - 50) / 50) * 44;
+  const line = evals.map((cp, index) => `${x(index)},${y(cp)}`).join(" ");
+
+  return (
+    <div className="w-full max-w-[600px]">
+      <div
+        className="relative h-[76px] w-full cursor-pointer overflow-hidden rounded-xl border border-[var(--line)] bg-[var(--panel)]"
+        onClick={(event) => {
+          const rect = event.currentTarget.getBoundingClientRect();
+          const ratio = (event.clientX - rect.left) / rect.width;
+          onJump(Math.round(ratio * total));
+        }}
+        title="Click to jump to a move"
+      >
+        <svg
+          viewBox="0 0 100 100"
+          preserveAspectRatio="none"
+          className="absolute inset-0 h-full w-full"
+        >
+          <line
+            x1="0"
+            y1="50"
+            x2="100"
+            y2="50"
+            stroke="rgba(255,255,255,0.16)"
+            strokeWidth="0.7"
+          />
+          <polyline
+            points={line}
+            fill="none"
+            stroke="var(--accent)"
+            strokeWidth="1.4"
+            vectorEffect="non-scaling-stroke"
+            strokeLinecap="round"
+          />
+          <polygon
+            points={`0,50 ${line} 100,50`}
+            fill="rgba(129,182,76,0.10)"
+          />
+        </svg>
+
+        {grades.map((grade, index) =>
+          grade && GRAPH_DOTS.includes(grade) ? (
+            <button
+              key={index}
+              onClick={(event) => {
+                event.stopPropagation();
+                onJump(index + 1);
+              }}
+              aria-label={LABEL_STYLES[grade].label}
+              className="absolute h-[7px] w-[7px] -translate-x-1/2 -translate-y-1/2 rounded-full ring-1 ring-black/40"
+              style={{
+                left: `${x(index + 1)}%`,
+                top: `${y(evals[index + 1] ?? 0)}%`,
+                background: LABEL_STYLES[grade].color,
+              }}
+            />
+          ) : null,
+        )}
+
+        <div
+          className="pointer-events-none absolute inset-y-0 w-px bg-[var(--accent)]"
+          style={{ left: `${x(at)}%` }}
+        />
+      </div>
+    </div>
+  );
+}
+
 function MoveChip({
   san,
   label,
+  evalCp,
   active,
   onClick,
 }: {
   san: string;
   label: MoveLabel | null | undefined;
+  evalCp: number | null;
   active: boolean;
   onClick: () => void;
 }) {
@@ -502,19 +782,26 @@ function MoveChip({
     <button
       onClick={onClick}
       className={[
-        "flex w-16 items-center justify-between rounded px-1.5 py-0.5 text-left transition-colors",
+        "flex min-w-[5.6rem] flex-1 items-center justify-between gap-2 rounded px-1.5 py-0.5 text-left transition-colors",
         active ? "bg-[var(--line)]" : "hover:bg-[var(--panel-2)]",
       ].join(" ")}
     >
       <span>{san}</span>
-      {style ? (
-        <span
-          className="ml-1 rounded px-1 text-[10px] leading-4"
-          style={{ background: style.color, color: style.text }}
-        >
-          {style.glyph || "·"}
-        </span>
-      ) : null}
+      <span className="flex items-center gap-1">
+        {evalCp !== null && (
+          <span className="text-[10px] text-[var(--muted)]">
+            {formatEval(evalCp)}
+          </span>
+        )}
+        {style ? (
+          <span
+            className="rounded px-1 text-[10px] leading-4"
+            style={{ background: style.color, color: style.text }}
+          >
+            {style.glyph || "·"}
+          </span>
+        ) : null}
+      </span>
     </button>
   );
 }
