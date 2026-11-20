@@ -694,26 +694,42 @@ export async function getPracticePuzzle(excludeId: string): Promise<{
   puzzle: PuzzleDTO;
   stats: PuzzleStats;
 }> {
-  const count = await prisma.puzzle.count();
-  if (count === 0) throw new Error("No puzzles available");
+  const select = {
+    id: true,
+    fen: true,
+    solution: true,
+    rating: true,
+    themes: true,
+    title: true,
+    source: true,
+  } as const;
 
-  const skip = Math.floor(Math.random() * count);
+  // Count the *filtered* set, not the whole table. Skipping a random index
+  // drawn from the full count meant the offset could land past the end of the
+  // shorter filtered list, and findFirst returned null.
+  const where = { id: { not: excludeId } };
+  const candidates = await prisma.puzzle.count({ where });
+
+  if (candidates === 0) {
+    // Only one puzzle in the database: return it instead of failing, so the
+    // button never dies with a 500.
+    const only = await prisma.puzzle.findUnique({
+      where: { id: excludeId },
+      select,
+    });
+    if (!only) throw new Error("No puzzles available — run `npm run db:content`");
+    return { puzzle: toPuzzleDTO(only), stats: await puzzleStats() };
+  }
+
+  const skip = Math.floor(Math.random() * candidates);
   const row = await prisma.puzzle.findFirst({
     skip,
     orderBy: { createdAt: "asc" },
-    where: count > 1 ? { id: { not: excludeId } } : undefined,
-    select: {
-      id: true,
-      fen: true,
-      solution: true,
-      rating: true,
-      themes: true,
-      title: true,
-      source: true,
-    },
+    where,
+    select,
   });
 
-  if (!row) throw new Error("No puzzles available");
+  if (!row) throw new Error("No puzzles available — run `npm run db:content`");
 
   return { puzzle: toPuzzleDTO(row), stats: await puzzleStats() };
 }
