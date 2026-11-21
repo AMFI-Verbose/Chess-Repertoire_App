@@ -100,6 +100,9 @@ def commits() -> list[dict]:
     out = []
     for line in raw.splitlines():
         h, when, iso, subject = line.split("\x1f")
+        # Ignore the commits that only exist to refresh this diagram.
+        if "timeline" in subject.lower():
+            continue
         out.append(
             {
                 "hash": h,
