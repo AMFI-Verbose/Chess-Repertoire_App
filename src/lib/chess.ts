@@ -74,6 +74,16 @@ export function turnOf(fen: string): "w" | "b" {
   return fen.split(" ")[1] === "b" ? "b" : "w";
 }
 
+/**
+ * Whose move it is at ply `index` of a game that began from `startFen`. Custom
+ * positions can start with black to move, so parity alone is not enough.
+ */
+export function turnAtPly(startFen: string, index: number): "w" | "b" {
+  const first = turnOf(startFen);
+  if (index % 2 === 0) return first;
+  return first === "w" ? "b" : "w";
+}
+
 /** "1." for white's move, "1..." for black's — used to label the move list. */
 export function moveNumberOf(ply: number): string {
   const moveNo = Math.floor((ply + 1) / 2);
@@ -106,6 +116,12 @@ export function splitPgnGames(pgn: string): string[] {
  * Returns null when chess.js rejects the PGN (illegal move, bad notation) —
  * a malformed paste must not crash the request.
  */
+/** One PGN header value, e.g. pgnHeader(pgn, "White"). */
+export function pgnHeader(pgn: string, name: string): string {
+  const match = new RegExp(`^\\[${name} "(.+)"\\]`, "m").exec(pgn);
+  return match ? match[1] : "";
+}
+
 export function parsePgnGame(chunk: string): PgnMove[] | null {
   const game = new Chess();
   try {

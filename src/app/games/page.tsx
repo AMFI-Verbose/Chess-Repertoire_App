@@ -3,6 +3,7 @@ import Link from "next/link";
 import { prisma } from "@/lib/prisma";
 import { deleteGame } from "@/app/actions";
 import { botById, opponentLabel } from "@/lib/bots";
+import { pgnHeader } from "@/lib/chess";
 
 export const dynamic = "force-dynamic";
 
@@ -72,6 +73,12 @@ export default async function GamesPage() {
             be replayed, graded move by move, and exported.
           </p>
         </div>
+        <Link
+          href="/import"
+          className="rounded-lg border border-[var(--line)] px-3 py-2 text-xs transition hover:border-[var(--accent)]"
+        >
+          Import a PGN →
+        </Link>
       </header>
 
       <div className="mb-8 grid grid-cols-2 gap-3 sm:grid-cols-4">
@@ -125,7 +132,11 @@ export default async function GamesPage() {
                 key={game.id}
                 className="flex flex-wrap items-center gap-3 rounded-xl border border-[var(--line)] bg-[var(--panel)] px-4 py-3"
               >
-                {game.botId ? (
+                {game.kind === "import" ? (
+                  <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-[var(--line)] font-mono text-[9px] text-[var(--muted)]">
+                    PGN
+                  </span>
+                ) : game.botId ? (
                   // eslint-disable-next-line @next/next/no-img-element
                   <img
                     src={botById(game.botId).avatar}
@@ -151,7 +162,11 @@ export default async function GamesPage() {
                     href={`/games/${game.id}`}
                     className="block truncate text-sm font-medium hover:text-[var(--accent)]"
                   >
-                    vs {opponentLabel(game.botId, game.level)}
+                    {game.kind === "import"
+                      ? `${pgnHeader(game.pgn, "White") || "White"} — ${
+                          pgnHeader(game.pgn, "Black") || "Black"
+                        }`
+                      : `vs ${opponentLabel(game.botId, game.level)}`}
                   </Link>
                   <span className="mt-0.5 block text-[11px] text-[var(--muted)]">
                     {game.playerColor === "white" ? "White" : "Black"} ·{" "}

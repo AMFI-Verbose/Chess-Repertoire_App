@@ -3,7 +3,7 @@ import { notFound } from "next/navigation";
 import { prisma } from "@/lib/prisma";
 import ReviewSequence, { type ReviewMove } from "@/components/ReviewSequence";
 import CopyPgn from "@/components/CopyPgn";
-import { START_FEN, normalizedFen, parsePgnGame } from "@/lib/chess";
+import { START_FEN, normalizedFen, parsePgnGame, pgnHeader } from "@/lib/chess";
 import { opponentLabel } from "@/lib/bots";
 
 export const dynamic = "force-dynamic";
@@ -54,7 +54,13 @@ export default async function GamePage({
     <ReviewSequence
       moves={moves}
       orientation={game.playerColor === "black" ? "black" : "white"}
-      title={`vs ${opponentLabel(game.botId, game.level)}`}
+      title={
+        game.kind === "import"
+          ? `${pgnHeader(game.pgn, "White") || "White"} — ${
+              pgnHeader(game.pgn, "Black") || "Black"
+            }`
+          : `vs ${opponentLabel(game.botId, game.level)}`
+      }
       subtitle={`${game.resultText} · ${
         game.timeControl === "unlimited" ? "no clock" : game.timeControl
       } · ${new Intl.DateTimeFormat("en-GB", {

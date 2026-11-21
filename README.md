@@ -12,10 +12,19 @@ Next.js 15 · TypeScript · Tailwind 4 · Prisma 6 · SQLite · chess.js · reac
 
 | Build | Play | Review |
 |---|---|---|
-| Author a move tree, add branches, write notes, import PGN. Opening names and transpositions are detected as you walk the line. | Face Stockfish 19 at eight named levels, with a real clock (bullet → classical), an optional custom start position, a live evaluation bar, take-backs and resign. Every finished game is saved. | Walk the line move by move; each move is graded **Brilliant · Great · Best · Excellent · Good · Book · Inaccuracy · Mistake · Blunder**, with colour, glyph, sound and a floating verdict. |
+| Author a move tree, add branches, write notes, import PGN. Opening names and transpositions are detected as you walk the line. | Face Stockfish 19 at eight named levels, with a real clock (bullet → classical), an optional custom start position, a live evaluation bar, the captured pieces and material count beside each clock, take-backs and resign. Every finished game is saved. | Walk the line move by move; each move is graded **Brilliant · Great · Best · Excellent · Good · Book · Inaccuracy · Mistake · Blunder**, with colour, glyph, sound and a floating verdict. |
 
 Plus a searchable **opening library**: 3,865 ECO lines, searchable by name,
 code (`B90`) or move sequence (`1.e4 c5`), each previewable on a board.
+
+### Import a game
+
+`/import` takes any PGN — a tournament export, a game from a book, a study — and
+files it beside your own games. It goes through the same review pass as a played
+game: Lichess-shaped accuracy, centipawn loss, a label on every move, an eval
+graph you can click. Games brought in this way are listed under their PGN headers
+(`Morphy, Paul — Duke Karl / Count Isouard`) with a `PGN` marker instead of an
+opponent avatar.
 
 ### Opponents
 
@@ -226,7 +235,8 @@ to move, so a move's cost is `best - (-score_after)`:
 ## Known limits
 
 - Promotion auto-queens (no picker yet).
-- Review grades the stored main line; reviewing an arbitrary pasted game is not wired up.
+- Analysis runs on demand; a 60-move game takes roughly ten seconds at 600 ms
+  per position, then it is cached.
 - Spaced-repetition drilling (`Review` table exists, unused) is the next milestone.
 - Stockfish here is the **lite** build: ~250 Elo below full Stockfish, but 1.8 MB and no COOP/COEP headers.
 
