@@ -407,12 +407,15 @@ export type OpeningSummary = {
  * Search the ECO table for the openings browser.
  *
  * Three input modes, mixed freely:
- *   text        — substring match on the name, or a partial ECO code ("B9")
+ *   text        — words that all have to appear in the name, or a partial ECO
+ *                 code ("B9"); "sicilian najdorf" works, so does "B90 najdorf"
  *   eco         — restrict to one volume (A/B/C/D/E)
  *   movePrefix  — UCI move tokens; filters to lines that *start* with them
  *
- * The last one is what makes the search feel clever: typing "1.e4 c5" on the
- * client is parsed into "e2e4 c7c5", and this returns the whole Sicilian.
+ * Typing "1.e4 c5" on the client becomes "e2e4 c7c5" and returns the whole
+ * Sicilian. A complete line also pulls in the lines that reach the same
+ * position by a different move order (transpositions), which is the one thing
+ * a prefix search alone cannot answer.
  */
 export async function searchOpenings(input: {
   text?: string;
@@ -430,9 +433,22 @@ export async function searchOpenings(input: {
   const text = input.text?.trim();
   if (text) {
     const upper = text.toUpperCase();
-    filters.push({
-      OR: [{ name: { contains: text } }, { eco: { contains: upper } }],
-    });
+    if (/^[a-e]\d{0,2}$/i.test(text)) {
+      // A code, whole or partial: "B", "B9", "B90".
+      filters.push({ eco: { startsWith: upper } });
+    } else {
+      // Every word must show up somewhere in the line's name, so a two-word
+      // query narrows instead of exploding ("Sicilian Najdorf" not "either").
+      const words = text.split(/\s+/).filter(Boolean);
+      filters.push({
+        AND: words.map((word) => ({
+          OR: [
+            { name: { contains: word } },
+            { eco: { contains: word.toUpperCase() } },
+          ],
+        })),
+      });
+    }
   }
 
   const prefix = input.movePrefix?.trim();
@@ -444,21 +460,77 @@ export async function searchOpenings(input: {
     where: filters.length > 0 ? { AND: filters } : undefined,
     // A line search reads like a table of contents, so the shortest lines
     // (the family names) come first and the deep variations follow.
-    orderBy: prefix ? [{ ply: "asc" }, { name: "asc" }] : [{ name: "asc" }],
-    take: limit + 40,
+    orderBy: prefix ? [{ ply: "asc" }, { name: "asc" }] : undefined,
+    take: limit + 80,
     select: { eco: true, name: true, movesUci: true, ply: true, epd: true },
   });
 
   // `startsWith` is a raw string comparison, so "e2e4" would also match a line
   // whose first token is "e2e4c7c5". Enforce the token boundary here.
-  const bounded = prefix
+  let bounded = prefix
     ? rows.filter(
         (row) =>
           row.movesUci === prefix || row.movesUci.startsWith(`${prefix} `),
       )
     : rows;
 
-  return bounded.slice(0, limit);
+  // A typed-out line that arrives at a known position by another move order.
+  const transpositions: OpeningSummary[] = [];
+  if (prefix && bounded.length < 8) {
+    const epd = epdOf(prefix);
+    if (epd) {
+      const same = await prisma.opening.findMany({
+        where: { epd, NOT: { movesUci: prefix } },
+        orderBy: [{ ply: "asc" }, { name: "asc" }],
+        take: 12,
+        select: { eco: true, name: true, movesUci: true, ply: true, epd: true },
+      });
+      for (const row of same) {
+        if (!bounded.some((visit) => visit.movesUci === row.movesUci)) {
+          transpositions.push(row);
+        }
+      }
+    }
+  }
+
+  // Relevance, not the alphabet: an exact code or a name that starts with what
+  // was typed comes first, then the family lines, then the deep variations.
+  if (text && !prefix) {
+    const needle = text.toLowerCase();
+    const rank = (row: OpeningSummary) => {
+      const name = row.name.toLowerCase();
+      if (row.eco.toLowerCase() === needle) return 0;
+      if (name.startsWith(needle)) return 1;
+      const words = needle.split(/\s+/).filter(Boolean);
+      if (words.every((word) => name.startsWith(word) || name.includes(` ${word}`))) {
+        return 2;
+      }
+      return 3;
+    };
+    bounded = [...bounded].sort(
+      (a, b) => rank(a) - rank(b) || a.ply - b.ply || a.name.localeCompare(b.name),
+    );
+  }
+
+  return [...bounded, ...transpositions].slice(0, limit);
+}
+
+/** The four-field FEN of a UCI line, i.e. its position with no move counters. */
+function epdOf(movesUci: string): string | null {
+  const game = new Chess();
+  for (const token of movesUci.split(" ")) {
+    if (!token) continue;
+    try {
+      game.move({
+        from: token.slice(0, 2),
+        to: token.slice(2, 4),
+        promotion: token.length > 4 ? token[4] : "q",
+      });
+    } catch {
+      return null;
+    }
+  }
+  return game.fen().split(" ").slice(0, 4).join(" ");
 }
 
 // ===========================================================================

@@ -5,7 +5,7 @@
   "scripts": {
     "predev": "node scripts/copy-engine.mjs",
     "dev": "next dev",
-    "prebuild": "node scripts/copy-engine.mjs",
+    "prebuild": "node scripts/copy-engine.mjs && npx tsx scripts/check-lessons.mts",
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
@@ -16,7 +16,8 @@
     "db:studio": "prisma studio",
     "db:reset": "prisma migrate reset --force && npm run db:seed && npm run db:openings && npm run db:content",
     "db:content": "node scripts/seed-community.mjs",
-    "db:puzzles": "node scripts/import-lichess-puzzles.mjs"
+    "db:puzzles": "node scripts/import-lichess-puzzles.mjs",
+    "check:lessons": "tsx scripts/check-lessons.mts"
   },
   "dependencies": {
     "@prisma/client": "^6.19.3",

@@ -17,6 +17,25 @@ Next.js 15 · TypeScript · Tailwind 4 · Prisma 6 · SQLite · chess.js · reac
 Plus a searchable **opening library**: 3,865 ECO lines, searchable by name,
 code (`B90`) or move sequence (`1.e4 c5`), each previewable on a board.
 
+### Learn
+
+`/learn` holds five short lessons — opening principles, the fork, the pin,
+back-rank mate, and Légal's mate — that play themselves on a real board while a
+coach explains each move. Where the lesson wants you to find the move, it hands
+you the board: wrong tries are answered by a 300 ms Stockfish search ("that costs
+about 1.8 pawns, the engine wants Bxf7+"), right ones move on. Progress is kept
+in `localStorage`. Every lesson is replayed and checked by
+`npx tsx scripts/check-lessons.mts` — illegal moves or a mate that is not mate
+fail the check.
+
+### Openings, step by step
+
+Pick any of the 3,865 lines and the board walks through it: play/pause, step
+forward and back, jump to a move by clicking it, arrow keys for the same, `⇅`
+to flip. Search takes several words at once ("sicilian najdorf" narrows instead
+of widening), a whole or partial ECO code, or a move sequence that also pulls in
+lines reaching the same position by another move order.
+
 ### Import a game
 
 `/import` takes any PGN — a tournament export, a game from a book, a study — and
