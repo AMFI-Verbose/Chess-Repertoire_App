@@ -21,12 +21,18 @@ type Analysis = {
   ratedBlack?: number;
 };
 
+/**
+ * The review writes one JSON blob per game: `{version, plies, grades, evals,
+ * summary}`. What the list needs is inside `summary` — reading the top level
+ * (the pre-summary layout) made every reviewed game still say "not reviewed".
+ */
 function parseAnalysis(raw: string | null): Analysis | null {
   if (!raw) return null;
   try {
-    const parsed = JSON.parse(raw) as Analysis;
-    if (typeof parsed.accuracyWhite !== "number") return null;
-    return parsed;
+    const parsed = JSON.parse(raw) as { summary?: Analysis };
+    if (!parsed.summary) return null;
+    if (typeof parsed.summary.accuracyWhite !== "number") return null;
+    return parsed.summary;
   } catch {
     return null;
   }
