@@ -22,6 +22,19 @@ function promotionOf(uci: string) {
   return uci.length > 4 ? uci[4] : "q";
 }
 
+const THEMES: { id: string; label: string }[] = [
+  { id: "", label: "All" },
+  { id: "mateIn1", label: "Mate in 1" },
+  { id: "mateIn2", label: "Mate in 2" },
+  { id: "fork", label: "Fork" },
+  { id: "pin", label: "Pin" },
+  { id: "sacrifice", label: "Sacrifice" },
+  { id: "skewer", label: "Skewer" },
+  { id: "discoveredAttack", label: "Discovered" },
+  { id: "endgame", label: "Endgame" },
+  { id: "hangingPiece", label: "Hanging piece" },
+];
+
 export default function PuzzleTrainer({
   initial,
   initialStats,
@@ -34,6 +47,7 @@ export default function PuzzleTrainer({
   const [puzzle, setPuzzle] = useState(initial);
   const [stats, setStats] = useState(initialStats);
   const [daily, setDaily] = useState(isDaily);
+  const [theme, setTheme] = useState<string>("");
   const [status, setStatus] = useState<Status>("solving");
   const [position, setPosition] = useState(initial.fen);
   const [step, setStep] = useState(0);
@@ -233,11 +247,35 @@ export default function PuzzleTrainer({
     if (status === "solving") void record(false);
   }
 
+  /** Switching theme fetches a puzzle from it straight away. */
+  async function changeTheme(next: string) {
+    cancelTimers();
+    setTheme(next);
+    setLoading(true);
+    try {
+      const fresh = await getPracticePuzzle(puzzle.id, next || undefined);
+      setPuzzle(fresh.puzzle);
+      setStats(fresh.stats);
+      setDaily(false);
+      setDelta(null);
+      setStatus("solving");
+      setStep(0);
+      setLastMove(null);
+      board.current = new Chess(fresh.puzzle.fen);
+      setPosition(fresh.puzzle.fen);
+      reported.current = false;
+    } catch {
+      // Keep the current puzzle on screen.
+    } finally {
+      setLoading(false);
+    }
+  }
+
   async function nextPuzzle() {
     cancelTimers();
     setLoading(true);
     try {
-      const fresh = await getPracticePuzzle(puzzle.id);
+      const fresh = await getPracticePuzzle(puzzle.id, theme || undefined);
       setPuzzle(fresh.puzzle);
       setStats(fresh.stats);
       setDaily(false);
@@ -445,6 +483,31 @@ export default function PuzzleTrainer({
             {solverPlays === "white" ? "White" : "Black"} to move. Drag the piece
             that starts the tactic — the first wrong move ends the attempt.
           </p>
+        </div>
+
+        <div className="rounded-xl border border-[var(--line)] bg-[var(--panel)] px-3 py-3">
+          <p className="mb-2 text-[11px] uppercase tracking-wider text-[var(--muted)]">
+            Practice theme
+          </p>
+          <div className="flex flex-wrap gap-1.5">
+            {THEMES.map((entry) => {
+              const active = theme === entry.id;
+              return (
+                <button
+                  key={entry.id}
+                  onClick={() => changeTheme(entry.id)}
+                  className="rounded-md border px-2 py-1 text-[11px] transition"
+                  style={{
+                    borderColor: active ? "var(--accent)" : "var(--line)",
+                    background: active ? "var(--panel-2)" : "transparent",
+                    color: active ? "var(--text)" : "var(--muted)",
+                  }}
+                >
+                  {entry.label}
+                </button>
+              );
+            })}
+          </div>
         </div>
 
         <div className="grid grid-cols-2 gap-3">

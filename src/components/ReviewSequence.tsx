@@ -16,7 +16,7 @@ import {
   type MoveLabel,
 } from "@/lib/classify";
 import { saveGameAnalysis } from "@/app/actions";
-import { START_FEN } from "@/lib/chess";
+import { START_FEN, turnOf, turnAtPly } from "@/lib/chess";
 import {
   DARK_SQUARE,
   LIGHT_SQUARE,
@@ -202,7 +202,7 @@ export default function ReviewSequence({
       if (cancelled) return;
 
       // White's point of view after every position, powering the eval graph.
-      const startTurn = new Chess(startFen).turn();
+      const startTurn = turnOf(startFen);
       const evalsWhite: number[] = [];
       for (let index = 0; index < positions.length; index += 1) {
         const cp = scoreToCp(results[index]?.lines[0], true);
@@ -243,7 +243,7 @@ export default function ReviewSequence({
         const isBestMove = bestUci === move.uci;
         const isBook = bookPlies.includes(move.ply);
 
-        const mover = index % 2 === 0 ? "w" : "b";
+        const mover = turnAtPly(startFen, index);
         const beforeFen = positions[index];
         const shedMaterial =
           materialFor(move.fen, mover) <= materialFor(beforeFen, mover) - 2;
@@ -428,7 +428,7 @@ export default function ReviewSequence({
     }
   }
 
-  const rows = groupMoves(moves);
+  const rows = groupMoves(moves, startFen);
   const counts = tally(grades);
 
   return (
@@ -934,7 +934,7 @@ function mean(values: number[]): number {
   return values.reduce((total, value) => total + value, 0) / values.length;
 }
 
-function groupMoves(moves: ReviewMove[]) {
+function groupMoves(moves: ReviewMove[], startFen: string) {
   const rows: {
     number: number;
     white: { san: string; ply: number; index: number };
@@ -942,13 +942,19 @@ function groupMoves(moves: ReviewMove[]) {
   }[] = [];
 
   moves.forEach((move, index) => {
-    const number = Math.floor(index / 2) + 1;
-    if (index % 2 === 0) {
+    // A position that starts with black to move puts a black move first.
+    const blackFirst = turnOf(startFen) === "b";
+    const adjusted = blackFirst ? index + 1 : index;
+    const number = Math.floor(adjusted / 2) + 1;
+    if (adjusted % 2 === 0) {
       rows.push({
         number,
         white: { san: move.san, ply: move.ply, index },
       });
     } else {
+      if (!rows[rows.length - 1]) {
+        rows.push({ number, white: { san: "", ply: -1, index: -1 } });
+      }
       rows[rows.length - 1].black = { san: move.san, ply: move.ply, index };
     }
   });

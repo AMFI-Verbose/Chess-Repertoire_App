@@ -720,7 +720,10 @@ export async function getDailyPuzzle(): Promise<{
  * the Elo climbs. We widen the search only when the narrow band is empty, and
  * we skip the puzzles attempted most recently so a session does not repeat.
  */
-export async function getPracticePuzzle(excludeId: string): Promise<{
+export async function getPracticePuzzle(
+  excludeId: string,
+  theme?: string,
+): Promise<{
   puzzle: PuzzleDTO;
   stats: PuzzleStats;
 }> {
@@ -757,7 +760,12 @@ export async function getPracticePuzzle(excludeId: string): Promise<{
   ];
 
   for (const [min, max] of bands) {
-    const where = { rating: { gte: min, lte: max }, id: { notIn: excluded } };
+    const where = {
+      rating: { gte: min, lte: max },
+      id: { notIn: excluded },
+      // A theme is a word in a space-separated list ("mateIn1 fork pin").
+      ...(theme ? { themes: { contains: theme } } : {}),
+    };
     const count = await prisma.puzzle.count({ where });
     if (count === 0) continue;
 
@@ -773,7 +781,10 @@ export async function getPracticePuzzle(excludeId: string): Promise<{
   // Every puzzle in the recent list was the whole table: repeat one rather
   // than fail the request.
   const fallback = await prisma.puzzle.findFirst({
-    where: { id: { not: excludeId } },
+    where: {
+      id: { not: excludeId },
+      ...(theme ? { themes: { contains: theme } } : {}),
+    },
     orderBy: { createdAt: "asc" },
     select,
   });
@@ -1076,6 +1087,68 @@ export async function saveEngineGame(input: SaveGameInput): Promise<{ id: string
     }
   }
 
+  revalidatePath("/games");
+  revalidatePath("/");
+  return { id: row.id };
+}
+
+/**
+ * Import an outside game as a PGN and open it in the review.
+ *
+ * This is the Lichess "import a game" flow: paste the PGN a tournament site
+ * gave you, pick which colour was yours, and the move list lands in the same
+ * review every other game uses. The PGN is re-parsed here rather than trusted,
+ * so a malformed paste is rejected at the door instead of breaking the board.
+ */
+export async function importGame(input: {
+  pgn: string;
+  as: "white" | "black";
+}): Promise<{ id: string }> {
+  const raw = input.pgn.trim();
+  if (!raw) throw new Error("Paste a PGN first.");
+  if (raw.length > 200_000) throw new Error("That PGN is too long to import.");
+
+  const board = new Chess();
+  try {
+    board.loadPgn(raw);
+  } catch {
+    throw new Error("That text is not a PGN game chess.js can read.");
+  }
+
+  const history = board.history({ verbose: true });
+  if (history.length === 0) throw new Error("This PGN has no moves in it.");
+
+  const headers = board.getHeaders();
+  const resultHeader = headers.Result ?? "*";
+  const winner =
+    resultHeader === "1-0" ? "white" : resultHeader === "0-1" ? "black" : "draw";
+  const outcome: "win" | "loss" | "draw" =
+    winner === "draw" ? "draw" : winner === input.as ? "win" : "loss";
+
+  const white = headers.White || "White";
+  const black = headers.Black || "Black";
+  const event = headers.Event && headers.Event !== "?" ? headers.Event : "Imported game";
+
+  const row = await prisma.game.create({
+    data: {
+      kind: "import",
+      playerColor: input.as,
+      result: outcome,
+      resultText: `${white} vs ${black} · ${resultHeader}`.slice(0, 120),
+      // The engine fields are meaningless for an imported game, so they keep
+      // their defaults and the review labels it by its PGN headers instead.
+      skill: 12,
+      level: 4,
+      botId: null,
+      timeControl: (headers.TimeControl || "unlimited").slice(0, 12),
+      startFen: (headers.FEN ?? "").slice(0, 200),
+      pgn: board.pgn({ maxWidth: 80, newline: "\n" }),
+      fen: board.fen(),
+      plies: history.length,
+    },
+  });
+
+  void event;
   revalidatePath("/games");
   revalidatePath("/");
   return { id: row.id };

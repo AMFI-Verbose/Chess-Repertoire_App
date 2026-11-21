@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { Chessboard } from "react-chessboard";
 import { Chess } from "chess.js";
@@ -13,6 +13,13 @@ import { START_FEN, tryMove, turnOf } from "@/lib/chess";
 import { DARK_SQUARE, LIGHT_SQUARE } from "@/lib/boardTheme";
 import { hintStyles } from "@/lib/boardHints";
 import { play } from "@/lib/sound";
+import {
+  CAPTURED_GLYPH,
+  capturedFrom,
+  materialDiff,
+  sortedCaptured,
+  type Captured,
+} from "@/lib/material";
 import { formatClock, levelByNumber, timeControlById } from "@/lib/gameOptions";
 import { DEFAULT_BOT, botById, chooseBotMove } from "@/lib/bots";
 import { botChatLine, botReply, type ChatEvent } from "@/lib/botChat";
@@ -121,6 +128,18 @@ export default function PlayVsEngine({
   const opponentName = isCharacter ? bot.name : "Stockfish";
   const timeControl = timeControlById(tcId);
   const clockOn = timeControl.initial !== null;
+
+  // The fallen pieces, replayed from the start position. Cheap enough to redo
+  // on every move, and it stays right after a takeback.
+  const captured = useMemo<Captured>(
+    () => capturedFrom(startFen, moves.map((move) => move.san)),
+    [moves, startFen],
+  );
+
+  const diff = materialDiff(captured);
+  const yourDiff = youPlay === "w" ? diff : -diff;
+  const yourCaps = youPlay === "w" ? captured.byWhite : captured.byBlack;
+  const theirCaps = youPlay === "w" ? captured.byBlack : captured.byWhite;
 
   const getEngine = useCallback(() => {
     if (!engineRef.current) engineRef.current = new Engine();
@@ -594,7 +613,7 @@ export default function PlayVsEngine({
 
   const whiteShare =
     evalCp === null ? 0.5 : 0.5 + Math.max(-1, Math.min(1, evalCp / 1000)) / 2;
-  const rows = groupMoves(moves);
+  const rows = groupMoves(moves, startFen);
 
   const yourMs = youPlay === "w" ? whiteMs : blackMs;
   const theirMs = youPlay === "w" ? blackMs : whiteMs;
@@ -783,6 +802,11 @@ export default function PlayVsEngine({
                   active={status === "playing" && !yourTurn}
                   low={theirMs < 20000}
                 />
+                <CapturedRow
+                  pieces={theirCaps}
+                  advantage={Math.max(0, -yourDiff)}
+                  side={youPlay}
+                />
               </div>
             )}
 
@@ -817,6 +841,11 @@ export default function PlayVsEngine({
                   value={formatClock(yourMs)}
                   active={status === "playing" && yourTurn}
                   low={yourMs < 20000}
+                />
+                <CapturedRow
+                  pieces={yourCaps}
+                  advantage={Math.max(0, yourDiff)}
+                  side={youPlay === "w" ? "b" : "w"}
                 />
               </div>
             )}
@@ -973,6 +1002,33 @@ export default function PlayVsEngine({
   );
 }
 
+/** The fallen pieces under a clock, plus the material lead when there is one. */
+function CapturedRow({
+  pieces,
+  advantage,
+  side,
+}: {
+  pieces: string[];
+  advantage: number;
+  side: "w" | "b";
+}) {
+  if (pieces.length === 0 && advantage <= 0) return <div className="h-5" />;
+  return (
+    <div className="mt-1 flex h-5 items-center gap-1 px-2 text-[14px] leading-none text-[var(--muted)]">
+      {sortedCaptured(pieces).map((type, index) => (
+        <span key={`${type}-${index}`} className="opacity-75">
+          {CAPTURED_GLYPH[type]?.[side] ?? ""}
+        </span>
+      ))}
+      {advantage > 0 ? (
+        <span className="ml-1 font-mono text-[11px] text-[var(--text)]">
+          +{advantage}
+        </span>
+      ) : null}
+    </div>
+  );
+}
+
 function ClockCard({
   label,
   sub,
@@ -1037,13 +1093,16 @@ function formatEval(cp: number): string {
   return `${pawns > 0 ? "+" : ""}${pawns.toFixed(2)}`;
 }
 
-function groupMoves(moves: { san: string; uci: string }[]) {
+function groupMoves(moves: { san: string; uci: string }[], startFen: string) {
   const rows: { number: number; white: string; black?: string }[] = [];
+  const blackFirst = turnOf(startFen) === "b";
   moves.forEach((move, index) => {
-    const number = Math.floor(index / 2) + 1;
-    if (index % 2 === 0) {
+    const adjusted = blackFirst ? index + 1 : index;
+    const number = Math.floor(adjusted / 2) + 1;
+    if (adjusted % 2 === 0) {
       rows.push({ number, white: move.san });
     } else {
+      if (!rows[rows.length - 1]) rows.push({ number, white: "" });
       rows[rows.length - 1].black = move.san;
     }
   });
