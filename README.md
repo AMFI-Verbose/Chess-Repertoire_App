@@ -163,7 +163,13 @@ Both are deliberately local-first: there is no server and no account. The
 library ships with the app and the threads live in your own database — seeded
 comments are sample content.
 
-### Screenshots
+### Development timeline
+
+`docs/development-timeline.png` is generated from `git log` by
+`python3 scripts/dev-timeline.py` — every commit, its local time, and the phase it
+belongs to. Re-run it after each milestone commit (it is also refreshed daily).
+
+## Screenshots
 
 | Build | Opening library |
 |---|---|
