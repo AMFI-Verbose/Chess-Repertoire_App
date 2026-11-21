@@ -112,6 +112,33 @@ export default async function DashboardPage() {
         ))}
       </div>
 
+      <Link
+        href="/learn"
+        className="group mb-3 flex flex-wrap items-center gap-4 rounded-xl border border-[var(--accent)]/40 bg-[var(--panel)] px-5 py-4 transition hover:border-[var(--accent)]"
+      >
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img
+          src="/bots/marlow.png"
+          alt="Coach"
+          className="h-10 w-10 shrink-0 rounded-full object-cover"
+        />
+        <span className="min-w-0 flex-1">
+          <span className="block font-medium">
+            Learn with a coach
+            <span className="ml-2 rounded bg-[var(--accent)]/15 px-1.5 py-0.5 text-[10px] font-normal uppercase tracking-wider text-[var(--accent)]">
+              new
+            </span>
+          </span>
+          <span className="mt-0.5 block text-xs text-[var(--muted)]">
+            Five short lessons — the coach talks you through every move and hands
+            you the board when it is your turn
+          </span>
+        </span>
+        <span className="text-xs text-[var(--accent)] transition group-hover:translate-x-0.5">
+          Start →
+        </span>
+      </Link>
+
       <div className="mb-10 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
         <Link
           href="/openings"

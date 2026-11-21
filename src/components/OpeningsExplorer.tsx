@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { Chessboard } from "react-chessboard";
 import { Chess } from "chess.js";
@@ -9,6 +9,8 @@ import { searchOpenings, type OpeningSummary } from "@/app/actions";
 import { DARK_SQUARE, LIGHT_SQUARE } from "@/lib/boardTheme";
 
 const VOLUMES = ["A", "B", "C", "D", "E"] as const;
+const START_FEN = new Chess().fen();
+const PLAY_MS = 620;
 
 /**
  * Turn free text into a UCI move prefix, but only when it looks like a line.
@@ -45,10 +47,22 @@ function parseMovePrefix(text: string): string | null {
   return uci.length > 0 ? uci.join(" ") : null;
 }
 
-/** Replay a UCI line into a renderable position plus readable SAN moves. */
-function replayLine(movesUci: string): { fen: string; sans: string[] } {
+type Line = {
+  /** Position before every move, plus the final one: fens.length = moves + 1. */
+  fens: string[];
+  sans: string[];
+  ucis: string[];
+};
+
+/**
+ * Replay a UCI line into every position it passes through, so the board can
+ * step forward and back instead of only showing the end of the variation.
+ */
+function buildLine(movesUci: string): Line {
   const game = new Chess();
+  const fens: string[] = [game.fen()];
   const sans: string[] = [];
+  const ucis: string[] = [];
 
   for (const token of movesUci.split(" ")) {
     if (!token) continue;
@@ -59,12 +73,14 @@ function replayLine(movesUci: string): { fen: string; sans: string[] } {
         promotion: token.length > 4 ? token[4] : "q",
       });
       sans.push(move.san);
+      ucis.push(`${move.from}${move.to}${move.promotion ?? ""}`);
+      fens.push(game.fen());
     } catch {
       break;
     }
   }
 
-  return { fen: game.fen(), sans };
+  return { fens, sans, ucis };
 }
 
 /** "1. e4 e5 2. Nf3 …" — the move text as a human writes it. */
@@ -79,10 +95,26 @@ function toPgnText(sans: string[]): string {
 
 /** Just the opening moves, for the dense result rows. */
 function previewOf(movesUci: string, max = 6): string {
-  const { sans } = replayLine(movesUci);
+  const { sans } = buildLine(movesUci);
   if (sans.length === 0) return "";
   const head = toPgnText(sans.slice(0, max));
   return sans.length > max ? `${head} …` : head;
+}
+
+/** The squares a UCI move touches, for the "you are here" highlight. */
+function moveStyles(ucis: string[], step: number) {
+  if (step === 0 || ucis.length === 0) return undefined;
+  const last = ucis[step - 1];
+  if (!last) return undefined;
+  const from = last.slice(0, 2);
+  const to = last.slice(2, 4);
+  return {
+    [from]: { background: "rgba(155, 199, 0, 0.28)" },
+    [to]: {
+      background: "rgba(155, 199, 0, 0.45)",
+      boxShadow: "inset 0 0 0 2px rgba(155,199,0,0.9)",
+    },
+  };
 }
 
 export default function OpeningsExplorer({
@@ -100,8 +132,12 @@ export default function OpeningsExplorer({
   );
   const [loading, setLoading] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [step, setStep] = useState(0);
+  const [playing, setPlaying] = useState(false);
+  const [flipped, setFlipped] = useState(false);
 
   const tokenRef = useRef(0);
+  const autoplay = useRef(false);
 
   useEffect(() => {
     const requestId = tokenRef.current + 1;
@@ -120,6 +156,7 @@ export default function OpeningsExplorer({
           limit: 60,
         });
         if (tokenRef.current !== requestId) return;
+        autoplay.current = false;
         setResults(rows);
         setSelected(rows[0] ?? null);
       } finally {
@@ -130,11 +167,66 @@ export default function OpeningsExplorer({
     return () => clearTimeout(timer);
   }, [text, volume]);
 
-  const detail = useMemo(
-    () => (selected ? replayLine(selected.movesUci) : null),
+  const line = useMemo(
+    () => (selected ? buildLine(selected.movesUci) : null),
     [selected],
   );
-  const pgn = detail ? toPgnText(detail.sans) : "";
+  const lastStep = line ? line.fens.length - 1 : 0;
+
+  // A newly picked line always starts at move one and plays itself in: that is
+  // the "watch it" behaviour, and pressing pause stops it where it stands.
+  useEffect(() => {
+    setStep(0);
+    setPlaying(Boolean(line && line.sans.length > 0 && autoplay.current));
+  }, [line]);
+
+  useEffect(() => {
+    if (!playing) return;
+    if (step >= lastStep) {
+      setPlaying(false);
+      return;
+    }
+    const timer = setTimeout(() => setStep((value) => value + 1), PLAY_MS);
+    return () => clearTimeout(timer);
+  }, [playing, step, lastStep]);
+
+  const go = useCallback(
+    (next: number) => {
+      setPlaying(false);
+      setStep(Math.min(Math.max(next, 0), lastStep));
+    },
+    [lastStep],
+  );
+
+  // Arrow keys walk the line whenever this page is the active tab and the user
+  // is not typing in the search box.
+  useEffect(() => {
+    function onKey(event: KeyboardEvent) {
+      const target = event.target as HTMLElement | null;
+      if (target && /^(INPUT|TEXTAREA|SELECT)$/.test(target.tagName)) return;
+      if (event.key === "ArrowRight") {
+        event.preventDefault();
+        setPlaying(false);
+        setStep((value) => Math.min(value + 1, lastStep));
+      } else if (event.key === "ArrowLeft") {
+        event.preventDefault();
+        setPlaying(false);
+        setStep((value) => Math.max(value - 1, 0));
+      } else if (event.key === "Home") {
+        event.preventDefault();
+        setPlaying(false);
+        setStep(0);
+      } else if (event.key === "End") {
+        event.preventDefault();
+        setPlaying(false);
+        setStep(lastStep);
+      }
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [lastStep]);
+
+  const pgn = line ? toPgnText(line.sans) : "";
 
   // Only the visible page of results is replayed — 60 lines, ~6 moves each.
   const previews = useMemo(() => {
@@ -149,6 +241,25 @@ export default function OpeningsExplorer({
     setCopied(true);
     setTimeout(() => setCopied(false), 1500);
   }
+
+  /** Picking a line always restarts it: clicking the active row replays it. */
+  function selectLine(row: OpeningSummary) {
+    autoplay.current = true;
+    if (selected && selected.movesUci === row.movesUci && selected.eco === row.eco) {
+      setStep(0);
+      setPlaying(true);
+      return;
+    }
+    setSelected(row);
+  }
+
+  function randomOpening() {
+    const pool = results.length > 0 ? results : initial;
+    if (pool.length === 0) return;
+    selectLine(pool[Math.floor(Math.random() * pool.length)]);
+  }
+
+  const styles = line ? moveStyles(line.ucis, step) : undefined;
 
   return (
     <main className="mx-auto w-full max-w-6xl px-6 py-8">
@@ -168,6 +279,12 @@ export default function OpeningsExplorer({
             open dataset
           </p>
         </div>
+        <Link
+          href="/learn"
+          className="rounded-lg border border-[var(--line)] px-3 py-2 text-xs transition hover:border-[var(--accent)]"
+        >
+          New to openings? Learn them →
+        </Link>
       </header>
 
       <div className="mb-5 rounded-xl border border-[var(--line)] bg-[var(--panel)] p-4">
@@ -176,7 +293,7 @@ export default function OpeningsExplorer({
             <input
               value={text}
               onChange={(event) => setText(event.target.value)}
-              placeholder="Search: “Najdorf”, “B90”, or “1.e4 c5”"
+              placeholder="Search: “Najdorf”, “B90”, “Sicilian dragon”, or “1.e4 c5”"
               className="w-full rounded-lg border border-[var(--line)] bg-[var(--bg)] px-3 py-2 text-sm outline-none transition focus:border-[var(--accent)]"
             />
             {loading && (
@@ -203,12 +320,13 @@ export default function OpeningsExplorer({
           </div>
         </div>
         <p className="mt-2 text-[11px] text-[var(--muted)]">
-          Name, ECO code, or a move sequence — a line query matches every opening
-          that starts with those moves. A–E are the five ECO volumes.
+          Every word has to match the name, so “sicilian najdorf” finds the
+          Najdorf and nothing else. A move sequence matches lines that start with
+          those moves, and pulls in transpositions. A–E are the ECO volumes.
         </p>
       </div>
 
-      <div className="grid gap-5 md:grid-cols-[minmax(0,1fr)_320px]">
+      <div className="grid gap-5 md:grid-cols-[minmax(0,1fr)_380px]">
         <section className="rounded-xl border border-[var(--line)] bg-[var(--panel)]">
           <div className="flex items-center justify-between border-b border-[var(--line)] px-4 py-2.5">
             <span className="text-[11px] uppercase tracking-wider text-[var(--muted)]">
@@ -220,7 +338,7 @@ export default function OpeningsExplorer({
             </span>
           </div>
 
-          <div className="max-h-[60vh] overflow-y-auto">
+          <div className="max-h-[62vh] overflow-y-auto">
             {results.length === 0 ? (
               <p className="px-4 py-8 text-center text-xs text-[var(--muted)]">
                 Nothing matched. Try a shorter phrase, or a move sequence like
@@ -235,7 +353,7 @@ export default function OpeningsExplorer({
                   return (
                     <li key={`${row.eco}-${row.movesUci}`}>
                       <button
-                        onClick={() => setSelected(row)}
+                        onClick={() => selectLine(row)}
                         className={[
                           "flex w-full items-center gap-3 border-b border-[var(--line)]/60 px-4 py-2.5 text-left transition-colors",
                           isActive
@@ -265,19 +383,112 @@ export default function OpeningsExplorer({
         </section>
 
         <aside className="flex flex-col gap-3">
-          {selected && detail ? (
+          {selected && line ? (
             <>
               <div className="overflow-hidden rounded-xl border border-[var(--line)]">
                 <Chessboard
                   options={{
                     id: "openings-board",
-                    position: detail.fen,
-                    boardOrientation: "white",
+                    position: line.fens[step] ?? START_FEN,
+                    boardOrientation: flipped ? "black" : "white",
+                    squareStyles: styles,
                     lightSquareStyle: LIGHT_SQUARE,
                     darkSquareStyle: DARK_SQUARE,
-                    animationDurationInMs: 0,
+                    animationDurationInMs: 320,
                   }}
                 />
+              </div>
+
+              <div className="rounded-xl border border-[var(--line)] bg-[var(--panel)] p-3">
+                <div className="flex items-center justify-between gap-2">
+                  <div className="flex items-center gap-1">
+                    <StepButton
+                      label="⏮"
+                      title="Back to the start"
+                      onClick={() => go(0)}
+                      disabled={step === 0}
+                    />
+                    <StepButton
+                      label="◀"
+                      title="Previous move"
+                      onClick={() => go(step - 1)}
+                      disabled={step === 0}
+                    />
+                    <button
+                      onClick={() => {
+                        if (step >= lastStep) setStep(0);
+                        setPlaying((value) => !value);
+                      }}
+                      title={playing ? "Pause" : "Play the line"}
+                      className="rounded-lg border border-[var(--line)] px-3 py-1.5 text-sm transition hover:border-[var(--accent)]"
+                    >
+                      {playing ? "❚❚" : "▶"}
+                    </button>
+                    <StepButton
+                      label="▶"
+                      title="Next move"
+                      onClick={() => go(step + 1)}
+                      disabled={step >= lastStep}
+                    />
+                    <StepButton
+                      label="⏭"
+                      title="Jump to the final position"
+                      onClick={() => go(lastStep)}
+                      disabled={step >= lastStep}
+                    />
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span className="font-mono text-[11px] text-[var(--muted)]">
+                      {step}/{lastStep}
+                    </span>
+                    <button
+                      onClick={() => setFlipped((value) => !value)}
+                      title="Flip the board"
+                      className="rounded-md border border-[var(--line)] px-2 py-1 text-[11px] text-[var(--muted)] transition hover:text-[var(--text)]"
+                    >
+                      ⇅
+                    </button>
+                    <button
+                      onClick={randomOpening}
+                      title="Pick a random line from the results"
+                      className="rounded-md border border-[var(--line)] px-2 py-1 text-[11px] text-[var(--muted)] transition hover:text-[var(--text)]"
+                    >
+                      Random
+                    </button>
+                  </div>
+                </div>
+
+                <div className="mt-3 flex flex-wrap items-baseline gap-x-1 gap-y-1 font-mono text-xs leading-relaxed">
+                  {line.sans.map((san, index) => {
+                    const whitesTurn = index % 2 === 0;
+                    const here = step === index + 1;
+                    return (
+                      <span key={`${san}-${index}`} className="flex items-baseline gap-1">
+                        {whitesTurn && (
+                          <span className="text-[var(--muted)]">
+                            {index / 2 + 1}.
+                          </span>
+                        )}
+                        <button
+                          onClick={() => go(index + 1)}
+                          className={[
+                            "rounded px-1 transition-colors",
+                            here
+                              ? "bg-[var(--accent)]/25 text-[var(--text)]"
+                              : "text-[var(--muted)] hover:text-[var(--text)]",
+                          ].join(" ")}
+                        >
+                          {san}
+                        </button>
+                      </span>
+                    );
+                  })}
+
+                </div>
+
+                <p className="mt-2 text-[11px] text-[var(--muted)]">
+                  ← → arrows, or click a move to jump · ▶ watches the whole line
+                </p>
               </div>
 
               <div className="rounded-xl border border-[var(--line)] bg-[var(--panel)] p-4">
@@ -290,11 +501,11 @@ export default function OpeningsExplorer({
                   </h2>
                 </div>
 
-                <p className="mt-3 font-mono text-xs leading-relaxed text-[var(--muted)]">
+                <p className="mt-2 font-mono text-[11px] leading-relaxed text-[var(--muted)]">
                   {pgn}
                 </p>
 
-                <div className="mt-3 flex items-center gap-2">
+                <div className="mt-3 flex flex-wrap items-center gap-3">
                   <button
                     onClick={copyLine}
                     className="rounded-lg border border-[var(--line)] px-2.5 py-1.5 text-[11px] transition hover:border-[var(--accent)]"
@@ -312,12 +523,35 @@ export default function OpeningsExplorer({
             </>
           ) : (
             <div className="rounded-xl border border-dashed border-[var(--line)] p-6 text-center text-xs text-[var(--muted)]">
-              Pick a line to preview it on the board.
+              Pick a line to watch it move by move.
             </div>
           )}
         </aside>
       </div>
     </main>
+  );
+}
+
+function StepButton({
+  label,
+  title,
+  onClick,
+  disabled,
+}: {
+  label: string;
+  title: string;
+  onClick: () => void;
+  disabled?: boolean;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      title={title}
+      disabled={disabled}
+      className="rounded-lg border border-[var(--line)] px-2.5 py-1.5 text-sm transition enabled:hover:border-[var(--accent)] disabled:opacity-35"
+    >
+      {label}
+    </button>
   );
 }
 
