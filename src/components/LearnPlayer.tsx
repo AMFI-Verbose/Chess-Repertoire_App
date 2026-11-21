@@ -5,31 +5,32 @@ import Link from "next/link";
 import { Chessboard } from "react-chessboard";
 import { Chess } from "chess.js";
 
-import { LESSONS, lessonById } from "@/lib/learn";
+import { neighbours, type Lesson } from "@/lib/learn";
+import {
+  completeLesson,
+  loadProgress,
+  rememberLesson,
+  xpForLesson,
+} from "@/lib/learnProgress";
 import { Engine, scoreToCp } from "@/lib/engine";
 import { DARK_SQUARE, LIGHT_SQUARE } from "@/lib/boardTheme";
 
 const START_FEN = new Chess().fen();
-const PROGRESS_KEY = "chess.learn.v1";
 const COACH_AVATAR = "/bots/marlow.png";
 
 type Message = { id: number; from: "coach" | "you"; text: string };
 
-function readProgress(): string[] {
-  if (typeof window === "undefined") return [];
-  try {
-    const raw = window.localStorage.getItem(PROGRESS_KEY);
-    const parsed = raw ? JSON.parse(raw) : [];
-    return Array.isArray(parsed) ? parsed.filter((id) => typeof id === "string") : [];
-  } catch {
-    return [];
-  }
-}
-
-export default function LearnPanel({ initialId }: { initialId?: string }) {
-  const [lessonId, setLessonId] = useState(initialId ?? LESSONS[0].id);
-  const lesson = lessonById(lessonId) ?? LESSONS[0];
-
+export default function LearnPlayer({
+  lesson,
+  chapterTitle,
+  lessonNumber,
+  lessonTotal,
+}: {
+  lesson: Lesson;
+  chapterTitle: string;
+  lessonNumber: number;
+  lessonTotal: number;
+}) {
   const [index, setIndex] = useState(0);
   const [fen, setFen] = useState(lesson.startFen ?? START_FEN);
   const [messages, setMessages] = useState<Message[]>([]);
@@ -38,16 +39,18 @@ export default function LearnPanel({ initialId }: { initialId?: string }) {
   const [selected, setSelected] = useState<string | null>(null);
   const [played, setPlayed] = useState<string[]>([]);
   const [lastMove, setLastMove] = useState<{ from: string; to: string } | null>(null);
-  const [completed, setCompleted] = useState<string[]>(readProgress);
   const [runNonce, setRunNonce] = useState(0);
+  const [finished, setFinished] = useState(false);
 
   const gameRef = useRef(new Chess(lesson.startFen));
   const engineRef = useRef<Engine | null>(null);
   const timers = useRef<number[]>([]);
   const messageId = useRef(0);
   const stepRun = useRef<string>("");
+  const awarded = useRef(false);
 
   const step = lesson.steps[index];
+  const { next, prev } = useMemo(() => neighbours(lesson.id), [lesson.id]);
 
   const say = useCallback((from: "coach" | "you", text: string) => {
     messageId.current += 1;
@@ -55,8 +58,6 @@ export default function LearnPanel({ initialId }: { initialId?: string }) {
     setMessages((current) => [...current, { id, from, text }]);
   }, []);
 
-  // Every scheduling goes through here so leaving the page (or switching
-  // lessons) cannot leave a stray timeout playing moves on a dead board.
   const later = (fn: () => void, ms: number) => {
     const timer = window.setTimeout(fn, ms);
     timers.current.push(timer);
@@ -69,13 +70,10 @@ export default function LearnPanel({ initialId }: { initialId?: string }) {
 
   useEffect(() => () => cancelTimers(), []);
 
-  // Restart from a clean board whenever the lesson changes.
-  function restart(id = lessonId) {
+  function restart() {
     cancelTimers();
-    const next = lessonById(id) ?? LESSONS[0];
-    setLessonId(next.id);
-    gameRef.current = new Chess(next.startFen);
-    setFen(next.startFen ?? START_FEN);
+    gameRef.current = new Chess(lesson.startFen);
+    setFen(lesson.startFen ?? START_FEN);
     setMessages([]);
     setPlayed([]);
     setLastMove(null);
@@ -84,15 +82,21 @@ export default function LearnPanel({ initialId }: { initialId?: string }) {
     setHintOpen(false);
     setSelected(null);
     stepRun.current = "";
+    setFinished(false);
     setRunNonce((value) => value + 1);
   }
+
+  // Note the visit, so the overview can offer "Continue" later.
+  useEffect(() => {
+    rememberLesson(loadProgress(), lesson.id);
+  }, [lesson.id]);
 
   // Drive one step: talk, then play a move for the student, or hand over the
   // board and wait for their answer.
   useEffect(() => {
     cancelTimers();
-    const runKey = `${lesson.id}:${index}`;
-    if (stepRun.current === runKey) return; // Strict-mode double mount
+    const runKey = `${lesson.id}:${index}:${runNonce}`;
+    if (stepRun.current === runKey) return;
     stepRun.current = runKey;
 
     const current = lesson.steps[index];
@@ -114,13 +118,10 @@ export default function LearnPanel({ initialId }: { initialId?: string }) {
           setPlayed((list) => [...list, move.san]);
           setLastMove({ from: move.from, to: move.to });
         } catch {
-          // A broken lesson cannot happen: scripts/check-lessons.mts verifies
-          // every SAN before it ships. Fail quietly instead of freezing.
+          // The build refuses to ship a lesson with an illegal move, so this
+          // branch exists only so a bad state cannot freeze the player.
         }
-        const advance = window.setTimeout(
-          () => setIndex((value) => value + 1),
-          560,
-        );
+        const advance = window.setTimeout(() => setIndex((value) => value + 1), 560);
         timers.current.push(advance);
       }, 700);
       timers.current.push(playTimer);
@@ -140,23 +141,13 @@ export default function LearnPanel({ initialId }: { initialId?: string }) {
     setMode("idle");
   }, [lesson, index, runNonce, say]);
 
-  // Keep the active lesson visible in the horizontal strip on small screens.
+  // Award the lesson once, the first time the board reaches the end.
   useEffect(() => {
-    const el = document.querySelector('[data-learn-active="true"]');
-    el?.scrollIntoView({ block: "nearest", inline: "center", behavior: "smooth" });
-  }, [lessonId]);
-
-  useEffect(() => {
-    if (mode !== "done") return;
-    setCompleted((current) =>
-      current.includes(lesson.id) ? current : [...current, lesson.id],
-    );
+    if (mode !== "done" || awarded.current) return;
+    awarded.current = true;
+    completeLesson(loadProgress(), lesson.id);
+    setFinished(true);
   }, [mode, lesson.id]);
-
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-    window.localStorage.setItem(PROGRESS_KEY, JSON.stringify(completed));
-  }, [completed]);
 
   function getEngine() {
     if (!engineRef.current) engineRef.current = new Engine();
@@ -167,7 +158,6 @@ export default function LearnPanel({ initialId }: { initialId?: string }) {
   async function explainWrong(
     beforeFen: string,
     san: string,
-    wanted: string,
     hint: string | undefined,
   ) {
     const engine = getEngine();
@@ -202,8 +192,6 @@ export default function LearnPanel({ initialId }: { initialId?: string }) {
         } else if (drop >= 80) {
           verdict = `The engine prefers something ${(drop / 100).toFixed(1)} pawns stronger.`;
         } else if (bestForYou < -300) {
-          // In a position that is already lost every move "keeps" the same
-          // score, so comparing evaluations says nothing. Be honest about it.
           verdict =
             "The engine shrugs — the position is already bad, so no move saves it. This lesson is about the pattern, not the score.";
         } else {
@@ -213,8 +201,6 @@ export default function LearnPanel({ initialId }: { initialId?: string }) {
         verdict = "Not the move, exactly.";
       }
 
-      // Show the engine's own first choice only when it actually disagrees on
-      // merit; otherwise it reads as noise ("play Kf2" in a lost position).
       const bestUci = before.lines[0]?.pv?.[0];
       const worthShowing =
         bestForYou !== null && yoursForYou !== null && bestForYou - yoursForYou >= 80;
@@ -226,9 +212,7 @@ export default function LearnPanel({ initialId }: { initialId?: string }) {
             to: bestUci.slice(2, 4),
             promotion: bestUci.length > 4 ? bestUci[4] : "q",
           });
-          if (move.san !== san) {
-            verdict += ` The engine wants ${move.san}.`;
-          }
+          if (move.san !== san) verdict += ` The engine wants ${move.san}.`;
         } catch {
           // Ignore: the verdict still stands without the suggestion.
         }
@@ -257,7 +241,8 @@ export default function LearnPanel({ initialId }: { initialId?: string }) {
     const current = lesson.steps[index];
     if (!current?.ask) return false;
 
-    if (move.san === current.ask) {
+    const accepted = [current.ask, ...(current.accept ?? [])];
+    if (accepted.includes(move.san)) {
       gameRef.current.move({ from, to, promotion: "q" });
       setFen(gameRef.current.fen());
       setPlayed((list) => [...list, move.san]);
@@ -273,7 +258,7 @@ export default function LearnPanel({ initialId }: { initialId?: string }) {
     setSelected(null);
     say("you", move.san);
     setMode("busy");
-    void explainWrong(fen, move.san, current.ask, current.hint).catch(() => setMode("ask"));
+    void explainWrong(fen, move.san, current.hint).catch(() => setMode("ask"));
     return false;
   }
 
@@ -332,72 +317,71 @@ export default function LearnPanel({ initialId }: { initialId?: string }) {
   }, [selected, lastMove]);
 
   const orientation = lesson.side === "w" ? "white" : "black";
-  const progress = completed.includes(lesson.id);
-  const nextLesson = LESSONS[LESSONS.findIndex((item) => item.id === lesson.id) + 1];
+  const stepPercent = Math.round((index / lesson.steps.length) * 100);
+  const xp = xpForLesson(lesson);
 
   return (
-    <main className="mx-auto w-full max-w-6xl px-6 py-8">
-      <header className="mb-6 flex flex-wrap items-end justify-between gap-4">
-        <div>
-          <Link
-            href="/openings"
-            className="text-xs text-[var(--muted)] transition-colors hover:text-[var(--text)]"
-          >
-            ← Opening library
-          </Link>
-          <h1 className="mt-1 text-2xl font-semibold tracking-tight">Learn</h1>
-          <p className="text-sm text-[var(--muted)]">
-            Five short lessons with a coach who explains every move — and hands
-            you the board when it is your turn to find it.
-          </p>
+    <main className="mx-auto w-full max-w-5xl px-6 py-8">
+      <header className="mb-5">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="flex items-center gap-2 text-xs text-[var(--muted)]">
+            <Link href="/learn" className="transition-colors hover:text-[var(--text)]">
+              ← Learn
+            </Link>
+            <span>/</span>
+            <span>{chapterTitle}</span>
+          </div>
+          <div className="flex items-center gap-2 text-xs">
+            {prev && (
+              <Link
+                href={`/learn/${prev.id}`}
+                className="rounded-lg border border-[var(--line)] px-2.5 py-1 transition hover:border-[var(--accent)]"
+              >
+                ← {prev.title}
+              </Link>
+            )}
+            <button
+              onClick={restart}
+              className="rounded-lg border border-[var(--line)] px-2.5 py-1 transition hover:border-[var(--accent)]"
+            >
+              Restart
+            </button>
+            {next && (
+              <Link
+                href={`/learn/${next.id}`}
+                className="rounded-lg border border-[var(--line)] px-2.5 py-1 transition hover:border-[var(--accent)]"
+              >
+                {next.title} →
+              </Link>
+            )}
+          </div>
         </div>
-        <div className="flex items-center gap-3 text-xs text-[var(--muted)]">
-          <span>
-            {completed.length}/{LESSONS.length} finished
-          </span>
-          <button
-            onClick={() => restart(lesson.id)}
-            className="rounded-lg border border-[var(--line)] px-3 py-1.5 transition hover:border-[var(--accent)]"
-          >
-            Restart lesson
-          </button>
+
+        <div className="mt-2 flex flex-wrap items-end justify-between gap-3">
+          <div>
+            <p className="text-[11px] uppercase tracking-wider text-[var(--muted)]">
+              Lesson {lessonNumber} of {lessonTotal} · {lesson.minutes} min · {xp} XP
+            </p>
+            <h1 className="mt-0.5 text-2xl font-semibold tracking-tight">{lesson.title}</h1>
+            <p className="text-sm text-[var(--muted)]">{lesson.blurb}</p>
+          </div>
+          <div className="min-w-[180px]">
+            <div className="h-1.5 overflow-hidden rounded-full bg-[var(--panel-2)]">
+              <div
+                className="h-full rounded-full bg-[var(--accent)] transition-all"
+                style={{ width: `${Math.max(3, stepPercent)}%` }}
+              />
+            </div>
+            <p className="mt-1 text-right font-mono text-[10px] text-[var(--muted)]">
+              {Math.min(index, lesson.steps.length)}/{lesson.steps.length} steps
+            </p>
+          </div>
         </div>
       </header>
 
-      <div className="grid gap-5 md:grid-cols-[minmax(0,1fr)_320px] lg:grid-cols-[240px_minmax(0,1fr)_330px]">
-        <nav className="flex gap-2 overflow-x-auto pb-1 md:col-span-2 lg:col-span-1 lg:flex-col lg:overflow-visible lg:pb-0">
-          {LESSONS.map((item, position) => {
-            const active = item.id === lesson.id;
-            const done = completed.includes(item.id);
-            return (
-              <button
-                key={item.id}
-                data-learn-active={active ? "true" : "false"}
-                onClick={() => restart(item.id)}
-                className={[
-                  "min-w-[210px] shrink-0 rounded-xl border px-3 py-2.5 text-left transition lg:min-w-0 lg:shrink",
-                  active
-                    ? "border-[var(--accent)] bg-[var(--panel)]"
-                    : "border-[var(--line)] hover:border-[var(--muted)]",
-                ].join(" ")}
-              >
-                <div className="flex items-center justify-between gap-2">
-                  <span className="text-[11px] uppercase tracking-wider text-[var(--muted)]">
-                    Lesson {position + 1}
-                  </span>
-                  {done && <span className="text-[11px] text-[var(--accent)]">✓</span>}
-                </div>
-                <p className="mt-0.5 text-sm font-medium leading-snug">{item.title}</p>
-                <p className="mt-1 text-[11px] leading-relaxed text-[var(--muted)]">
-                  {item.blurb}
-                </p>
-              </button>
-            );
-          })}
-        </nav>
-
+      <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_320px]">
         <section className="flex flex-col items-center gap-3">
-          <div className="w-full max-w-[560px] overflow-hidden rounded-xl border border-[var(--line)] shadow-[0_10px_40px_-20px_rgba(0,0,0,0.9)]">
+          <div className="w-full max-w-[520px] overflow-hidden rounded-xl border border-[var(--line)] shadow-[0_10px_40px_-20px_rgba(0,0,0,0.9)]">
             <Chessboard
               options={{
                 id: "learn-board",
@@ -421,7 +405,7 @@ export default function LearnPanel({ initialId }: { initialId?: string }) {
             />
           </div>
 
-          <div className="flex w-full max-w-[560px] flex-wrap items-center justify-between gap-2">
+          <div className="flex w-full max-w-[520px] flex-wrap items-center justify-between gap-2">
             <div className="min-w-0 flex-1 font-mono text-[11px] text-[var(--muted)]">
               {played.length > 0 ? played.join(" ") : "start position"}
             </div>
@@ -454,32 +438,48 @@ export default function LearnPanel({ initialId }: { initialId?: string }) {
           </div>
 
           {mode === "ask" && hintOpen && step?.hint && (
-            <p className="w-full max-w-[560px] rounded-lg border border-[var(--line)] bg-[var(--panel)] px-3 py-2 text-xs leading-relaxed text-[var(--muted)]">
+            <p className="w-full max-w-[520px] rounded-lg border border-[var(--line)] bg-[var(--panel)] px-3 py-2 text-xs leading-relaxed text-[var(--muted)]">
               {step.hint}
             </p>
           )}
 
           {mode === "done" && (
-            <div className="w-full max-w-[560px] rounded-xl border border-[var(--accent)]/60 bg-[var(--panel)] px-4 py-3">
-              <p className="text-sm font-medium">Lesson finished ✓</p>
+            <div className="w-full max-w-[520px] rounded-xl border border-[var(--accent)]/60 bg-[var(--panel)] px-4 py-3">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <p className="text-sm font-medium">
+                  Lesson finished ✓ {finished && <span className="text-[var(--accent)]">+{xp} XP</span>}
+                </p>
+                <Link href="/learn" className="text-[11px] text-[var(--muted)] hover:text-[var(--text)]">
+                  All lessons
+                </Link>
+              </div>
               <p className="mt-1 text-xs leading-relaxed text-[var(--muted)]">
                 You played it, not just watched it — that is the part that sticks.
               </p>
-              <div className="mt-3 flex items-center gap-3">
-                {nextLesson && (
-                  <button
-                    onClick={() => restart(nextLesson.id)}
+              <div className="mt-3 flex flex-wrap items-center gap-3">
+                {next ? (
+                  <Link
+                    href={`/learn/${next.id}`}
                     className="rounded-lg bg-[var(--accent)] px-3 py-1.5 text-xs font-medium text-[#0b1602]"
                   >
-                    Next: {nextLesson.title} →
-                  </button>
+                    Next: {next.title} →
+                  </Link>
+                ) : (
+                  <Link
+                    href="/learn"
+                    className="rounded-lg bg-[var(--accent)] px-3 py-1.5 text-xs font-medium text-[#0b1602]"
+                  >
+                    Back to the curriculum →
+                  </Link>
                 )}
-                <Link
-                  href="/puzzles"
-                  className="text-xs text-[var(--muted)] transition-colors hover:text-[var(--text)]"
-                >
-                  Drill it in puzzles →
-                </Link>
+                {lesson.theme && (
+                  <Link
+                    href={`/puzzles?theme=${lesson.theme}`}
+                    className="text-xs text-[var(--muted)] transition-colors hover:text-[var(--text)]"
+                  >
+                    Drill {lesson.theme} in puzzles →
+                  </Link>
+                )}
               </div>
             </div>
           )}
@@ -496,17 +496,17 @@ export default function LearnPanel({ initialId }: { initialId?: string }) {
             <div>
               <p className="text-[12px] font-medium leading-tight">Coach</p>
               <p className="text-[10px] leading-tight text-[var(--muted)]">
-                {mode === "busy" ? "thinking…" : progress ? "lesson complete" : "your teacher"}
+                {mode === "busy" ? "thinking…" : finished ? "lesson complete" : "your teacher"}
               </p>
             </div>
-            {progress && (
+            {finished && (
               <span className="ml-auto rounded bg-[var(--accent)]/15 px-1.5 py-0.5 text-[10px] text-[var(--accent)]">
                 done
               </span>
             )}
           </div>
 
-          <div className="flex max-h-[62vh] flex-1 flex-col gap-2.5 overflow-y-auto p-3">
+          <div className="flex max-h-[60vh] flex-1 flex-col gap-2.5 overflow-y-auto p-3">
             {messages.map((message) =>
               message.from === "coach" ? (
                 <div key={message.id} className="flex gap-2">
@@ -516,7 +516,10 @@ export default function LearnPanel({ initialId }: { initialId?: string }) {
                   </p>
                 </div>
               ) : (
-                <div key={message.id} className="self-end rounded-lg bg-[var(--panel-2)] px-2.5 py-1 font-mono text-[12px]">
+                <div
+                  key={message.id}
+                  className="self-end rounded-lg bg-[var(--panel-2)] px-2.5 py-1 font-mono text-[12px]"
+                >
                   {message.text}
                 </div>
               ),

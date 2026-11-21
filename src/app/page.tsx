@@ -130,8 +130,8 @@ export default async function DashboardPage() {
             </span>
           </span>
           <span className="mt-0.5 block text-xs text-[var(--muted)]">
-            Five short lessons — the coach talks you through every move and hands
-            you the board when it is your turn
+            16 lessons in 5 chapters — every move explained, every task yours to
+            find, every wrong try answered by the engine
           </span>
         </span>
         <span className="text-xs text-[var(--accent)] transition group-hover:translate-x-0.5">

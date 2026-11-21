@@ -8,7 +8,12 @@ export const metadata = {
   title: "Puzzles · Chess Repertoire",
 };
 
-export default async function PuzzlesPage() {
+export default async function PuzzlesPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ theme?: string }>;
+}) {
+  const { theme } = await searchParams;
   const [{ puzzle, stats, isDaily }, libraryCount] = await Promise.all([
     getDailyPuzzle(),
     prisma.puzzle.count(),
@@ -29,7 +34,12 @@ export default async function PuzzlesPage() {
         </p>
       </header>
 
-      <PuzzleTrainer initial={puzzle} initialStats={stats} isDaily={isDaily} />
+      <PuzzleTrainer
+        initial={puzzle}
+        initialStats={stats}
+        isDaily={isDaily}
+        initialTheme={theme}
+      />
     </main>
   );
 }
