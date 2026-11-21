@@ -19,14 +19,24 @@ code (`B90`) or move sequence (`1.e4 c5`), each previewable on a board.
 
 ### Learn
 
-`/learn` holds five short lessons — opening principles, the fork, the pin,
-back-rank mate, and Légal's mate — that play themselves on a real board while a
-coach explains each move. Where the lesson wants you to find the move, it hands
-you the board: wrong tries are answered by a 300 ms Stockfish search ("that costs
-about 1.8 pawns, the engine wants Bxf7+"), right ones move on. Progress is kept
-in `localStorage`. Every lesson is replayed and checked by
-`npx tsx scripts/check-lessons.mts` — illegal moves or a mate that is not mate
-fail the check.
+`/learn` is a curriculum, not a demo: 16 lessons in 5 chapters (Foundations,
+Tactics, Checkmate patterns, Endgames, Openings), about two hours of material,
+each lesson a real board that plays itself while a coach explains every move.
+Where the lesson wants you to find the move, it hands you the board: wrong tries
+are answered by a 260 ms Stockfish search ("that costs about 1.8 pawns, the
+engine wants Bxf7+"), right ones move on. Each lesson ends with a drill
+deep-link into the puzzle trainer, filtered to that pattern
+(`/puzzles?theme=fork`).
+
+Progress lives in `localStorage` — completed lessons, XP per lesson, a daily
+streak, and the Pro entitlement. The Pro shelf (advanced mates, endgames,
+openings) is gated by that flag rather than hard-coded: billing is not wired, so
+the overview exposes a preview switch that shows exactly what a paywall would
+lock.
+
+Every lesson is replayed by `scripts/check-lessons.mts` before every build —
+illegal moves, a mate that is not mate, or `say` text that is missing fails the
+build.
 
 ### Openings, step by step
 
@@ -170,6 +180,7 @@ comments are sample content.
 | New game: level, clock, start |
 |---|
 | ![Setup](docs/screenshots/setup.png) | ![Home](docs/screenshots/home.png) |
+| ![Learn](docs/screenshots/learn-overview.png) | ![Lesson](docs/screenshots/learn-lesson.png) |
 
 ---
 

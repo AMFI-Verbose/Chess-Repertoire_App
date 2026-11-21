@@ -39,15 +39,17 @@ export default function PuzzleTrainer({
   initial,
   initialStats,
   isDaily,
+  initialTheme,
 }: {
   initial: PuzzleDTO;
   initialStats: PuzzleStats;
   isDaily: boolean;
+  initialTheme?: string;
 }) {
   const [puzzle, setPuzzle] = useState(initial);
   const [stats, setStats] = useState(initialStats);
   const [daily, setDaily] = useState(isDaily);
-  const [theme, setTheme] = useState<string>("");
+  const [theme, setTheme] = useState<string>(initialTheme ?? "");
   const [status, setStatus] = useState<Status>("solving");
   const [position, setPosition] = useState(initial.fen);
   const [step, setStep] = useState(0);
@@ -115,6 +117,15 @@ export default function PuzzleTrainer({
 
   // Leaving the page mid-reply should not leave a timer running.
   useEffect(() => () => cancelTimers(), [cancelTimers]);
+
+  // Arriving from a lesson with ?theme=fork: pull that drill straight away.
+  const themeLoaded = useRef(false);
+  useEffect(() => {
+    if (!initialTheme || themeLoaded.current) return;
+    themeLoaded.current = true;
+    void changeTheme(initialTheme);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initialTheme]);
 
   /** Validate and commit one attempt. Returns false for anything illegal. */
   function tryMove(sourceSquare: string, targetSquare: string): boolean {

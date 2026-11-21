@@ -1,12 +1,7 @@
-import LearnPanel from "@/components/LearnPanel";
+import LearnOverview from "@/components/LearnOverview";
 
 export const metadata = { title: "Learn · Chess Repertoire" };
 
-export default async function LearnPage({
-  searchParams,
-}: {
-  searchParams: Promise<{ lesson?: string }>;
-}) {
-  const { lesson } = await searchParams;
-  return <LearnPanel initialId={lesson} />;
+export default function LearnPage() {
+  return <LearnOverview />;
 }
