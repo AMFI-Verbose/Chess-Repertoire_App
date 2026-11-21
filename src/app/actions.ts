@@ -1045,22 +1045,36 @@ export async function saveEngineGame(input: SaveGameInput): Promise<{ id: string
         : "0-1",
   );
 
-  const row = await prisma.game.create({
-    data: {
-      kind: "engine",
-      playerColor: input.playerColor,
-      botId: input.botId ?? null,
-      level: Math.max(1, Math.min(8, Math.round(input.level))),
-      timeControl: input.timeControl.slice(0, 12),
-      startFen: input.startFen.slice(0, 200),
-      result: input.result,
-      resultText: input.resultText.slice(0, 120),
-      skill: Math.max(0, Math.min(20, Math.round(input.skill))),
-      pgn: game.pgn({ maxWidth: 80, newline: "\n" }),
-      fen: input.fen,
-      plies,
-    },
-  });
+  const data = {
+    kind: "engine",
+    playerColor: input.playerColor,
+    botId: input.botId ?? null,
+    level: Math.max(1, Math.min(8, Math.round(input.level))),
+    timeControl: input.timeControl.slice(0, 12),
+    startFen: input.startFen.slice(0, 200),
+    result: input.result,
+    resultText: input.resultText.slice(0, 120),
+    skill: Math.max(0, Math.min(20, Math.round(input.skill))),
+    pgn: game.pgn({ maxWidth: 80, newline: "\n" }),
+    fen: input.fen,
+    plies,
+  };
+
+  // A finished game is the one thing in this app that must never be lost, so
+  // the write gets two chances and a readable failure: a stale Prisma client
+  // (one built before the botId migration) rejects the whole row over a
+  // column the game can survive without.
+  let row: { id: string };
+  try {
+    row = await prisma.game.create({ data });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    if (/botId/i.test(message)) {
+      row = await prisma.game.create({ data: { ...data, botId: null } });
+    } else {
+      throw new Error(`Could not save this game: ${message.split("\n")[0]}`);
+    }
+  }
 
   revalidatePath("/games");
   revalidatePath("/");

@@ -2,7 +2,7 @@ import Link from "next/link";
 
 import { prisma } from "@/lib/prisma";
 import { deleteGame } from "@/app/actions";
-import { botById } from "@/lib/bots";
+import { botById, opponentLabel } from "@/lib/bots";
 
 export const dynamic = "force-dynamic";
 
@@ -119,6 +119,20 @@ export default async function GamesPage() {
                 key={game.id}
                 className="flex flex-wrap items-center gap-3 rounded-xl border border-[var(--line)] bg-[var(--panel)] px-4 py-3"
               >
+                {game.botId ? (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img
+                    src={botById(game.botId).avatar}
+                    alt={botById(game.botId).name}
+                    className="h-8 w-8 shrink-0 rounded-full object-cover"
+                    style={{ boxShadow: `0 0 0 1px ${botById(game.botId).accent}` }}
+                  />
+                ) : (
+                  <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-[var(--line)] font-mono text-[10px] text-[var(--muted)]">
+                    SF
+                  </span>
+                )}
+
                 <span
                   className="w-12 shrink-0 rounded-md py-1 text-center text-[11px] font-semibold"
                   style={{ background: style.color, color: style.text }}
@@ -131,7 +145,7 @@ export default async function GamesPage() {
                     href={`/games/${game.id}`}
                     className="block truncate text-sm font-medium hover:text-[var(--accent)]"
                   >
-                    vs {botById(game.botId).name} · ≈{botById(game.botId).rating}
+                    vs {opponentLabel(game.botId, game.level)}
                   </Link>
                   <span className="mt-0.5 block text-[11px] text-[var(--muted)]">
                     {game.playerColor === "white" ? "White" : "Black"} ·{" "}

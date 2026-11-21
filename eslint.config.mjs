@@ -18,6 +18,10 @@ const eslintConfig = [
       "out/**",
       "build/**",
       "next-env.d.ts",
+      // Vendored engine binaries and generated assets are not our source.
+      "public/engine/**",
+      "public/pieces/**",
+      "public/bots/**",
     ],
   },
 ];

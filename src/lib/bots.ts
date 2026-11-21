@@ -150,6 +150,21 @@ export const BOTS: BotProfile[] = [
 
 export const DEFAULT_BOT = BOTS[3];
 
+import { levelByNumber } from "@/lib/gameOptions";
+
+/** One line describing any opponent, saved game or not: character or engine. */
+export function opponentLabel(
+  botId: string | null | undefined,
+  level: number,
+): string {
+  if (botId) {
+    const bot = botById(botId);
+    return `${bot.name} (≈${bot.rating})`;
+  }
+  const engine = levelByNumber(level);
+  return `Stockfish · ${engine.name} (level ${engine.level})`;
+}
+
 export function botById(id: string | null | undefined): BotProfile {
   return BOTS.find((bot) => bot.id === id) ?? DEFAULT_BOT;
 }

@@ -66,12 +66,31 @@ export type ClassifyInput = {
   isSacrifice: boolean;
 };
 
+/**
+ * Mate scores are ±(10000 - n*10), three orders of magnitude larger than a
+ * normal eval. Comparing them as raw centipawns made every move in a mating
+ * position look like it threw away ninety pawns: a game that ended in mate
+ * was graded as fourteen blunders while the same numbers still scored 92%
+ * accuracy. So grading happens on the win-probability curve, where mate is
+ * simply "won", and centipawn loss for ACPL is capped.
+ */
+const MATE_SCORE = 9000;
+
+/** Push a mate score down to a normal-looking eval, keeping its sign. */
+export function clampEval(cp: number): number {
+  if (cp >= MATE_SCORE) return 1000;
+  if (cp <= -MATE_SCORE) return -1000;
+  return Math.max(-1000, Math.min(1000, cp));
+}
+
 export function classifyMove(input: ClassifyInput): MoveLabel {
   const { best, second, played, isBestMove, isBook, isSacrifice } = input;
 
   if (best === null || played === null) return isBook ? "book" : "good";
 
-  const loss = best - played;
+  const before = clampEval(best);
+  const after = clampEval(played);
+  const loss = before - after;
 
   // Being inside a known opening does not excuse a losing move: 2.Ke2 is in
   // the ECO table (the Bongcloud), but it still throws away most of White's
@@ -80,15 +99,22 @@ export function classifyMove(input: ClassifyInput): MoveLabel {
   if (isBook && loss <= 60) return "book";
 
   if (isBestMove) {
-    if (isSacrifice && played > -50) return "brilliant";
-    if (second !== null && best - second > 150) return "great";
+    if (isSacrifice && after > -50) return "brilliant";
+    if (second !== null && clampEval(best) - clampEval(second) > 150) {
+      return "great";
+    }
     return "best";
   }
 
-  if (loss <= 20) return "excellent";
-  if (loss <= 60) return "good";
-  if (loss <= 120) return "inaccuracy";
-  if (loss <= 250) return "mistake";
+  // How much of the game did this move give away? Measured in win points, so
+  // that a slip from +9.0 to +6.0 (still winning) is not a catastrophe, while
+  // the same 300 cp at +0.3 really is.
+  const drop = winPercent(before) - winPercent(after);
+
+  if (drop <= 1) return "excellent";
+  if (drop <= 3) return "good";
+  if (drop <= 8) return "inaccuracy";
+  if (drop <= 16) return "mistake";
   return "blunder";
 }
 
