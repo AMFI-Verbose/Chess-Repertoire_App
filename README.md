@@ -166,8 +166,17 @@ comments are sample content.
 ### Development timeline
 
 `docs/development-timeline.png` is generated from `git log` by
-`python3 scripts/dev-timeline.py` — every commit, its local time, and the phase it
-belongs to. Re-run it after each milestone commit (it is also refreshed daily).
+`scripts/dev-timeline.py` — every commit, its local time, and the phase it belongs
+to. Two things keep it current, so nothing has to be remembered:
+
+- `.githooks/post-commit` regenerates it after every commit and stages the image
+  (enable once with `git config core.hooksPath .githooks`).
+- A launchd agent (`~/Library/LaunchAgents/com.cjpeng.chess-timeline.plist`) reruns
+  it every day at 21:40 even when there are no new commits.
+
+Commits whose message contains "timeline" are filtered out of the diagram, so a
+refresh never counts itself. `scripts/run-dev-timeline.sh` picks whichever Python
+on the machine actually has Pillow (Homebrew's Python ships without it).
 
 ## Screenshots
 
