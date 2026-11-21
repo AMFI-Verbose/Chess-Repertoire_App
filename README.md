@@ -17,7 +17,14 @@ Next.js 15 · TypeScript · Tailwind 4 · Prisma 6 · SQLite · chess.js · reac
 Plus a searchable **opening library**: 3,865 ECO lines, searchable by name,
 code (`B90`) or move sequence (`1.e4 c5`), each previewable on a board.
 
-### The characters
+### Opponents
+
+The play screen has two panels, side by side (or stacked): **Play Stockfish**
+— the bare engine on an eight-level ladder, no personality and no chat — and
+**Play a character** — the same engine wearing a face and a handicap. Your
+choice is remembered between visits, and "New game" reopens on it.
+
+## The characters
 
 Eight opponents, each a real Stockfish wearing a handicap: how long it thinks, how wide it looks, and how often it settles for one of its other candidate moves. Skill Level 0 alone still beats beginners, so the low levels lean on that last dial.
 

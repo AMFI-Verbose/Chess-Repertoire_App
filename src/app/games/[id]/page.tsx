@@ -4,7 +4,7 @@ import { prisma } from "@/lib/prisma";
 import ReviewSequence, { type ReviewMove } from "@/components/ReviewSequence";
 import CopyPgn from "@/components/CopyPgn";
 import { START_FEN, normalizedFen, parsePgnGame } from "@/lib/chess";
-import { botById } from "@/lib/bots";
+import { opponentLabel } from "@/lib/bots";
 
 export const dynamic = "force-dynamic";
 
@@ -54,7 +54,7 @@ export default async function GamePage({
     <ReviewSequence
       moves={moves}
       orientation={game.playerColor === "black" ? "black" : "white"}
-      title={`vs ${botById(game.botId).name} (≈${botById(game.botId).rating})`}
+      title={`vs ${opponentLabel(game.botId, game.level)}`}
       subtitle={`${game.resultText} · ${
         game.timeControl === "unlimited" ? "no clock" : game.timeControl
       } · ${new Intl.DateTimeFormat("en-GB", {

@@ -11,7 +11,7 @@
 // grows with new puzzles.
 
 import { spawn } from "node:child_process";
-import { createReadStream, existsSync, statSync } from "node:fs";
+import { existsSync, statSync } from "node:fs";
 import { createRequire } from "node:module";
 import path from "node:path";
 import readline from "node:readline";

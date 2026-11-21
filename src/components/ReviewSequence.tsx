@@ -9,6 +9,7 @@ import { Engine, scoreToCp, type EngineResult } from "@/lib/engine";
 import {
   LABEL_STYLES,
   classifyMove,
+  clampEval,
   materialFor,
   moveAccuracy,
   winPercent,
@@ -27,7 +28,7 @@ import { play, type SoundName } from "@/lib/sound";
 export type ReviewMove = { san: string; uci: string; fen: string; ply: number };
 
 /** Bump when grading rules change: old stored reviews then re-run. */
-const ANALYSIS_VERSION = 3;
+const ANALYSIS_VERSION = 4;
 
 /** Sum of knights, bishops, rooks and queens still on the board. */
 function nonPawnMaterial(fen: string): number {
@@ -289,7 +290,13 @@ export default function ReviewSequence({
         // Accuracy needs both ends of the move; book moves have no evaluative
         // score, so they are excluded rather than counted as perfect.
         if (label !== "book" && best !== null && played !== null) {
-          losses[mover].push(Math.max(0, best - played));
+          // ACPL: centipawns given up, with mate scores clamped and a single
+          // move capped at five pawns so one tactic cannot swamp the average.
+          const capped = Math.min(
+            500,
+            Math.max(0, clampEval(best) - clampEval(played)),
+          );
+          losses[mover].push(capped);
           const moveScore = moveAccuracy(winPercent(best), winPercent(played));
           accuracies[mover].push(moveScore);
           phaseScores[phase].push(moveScore);
@@ -345,7 +352,7 @@ export default function ReviewSequence({
       engines.forEach((engine) => engine.terminate());
       engineRef.current = null;
     };
-  }, [moves, positions, bookPlies, gameId, storedAnalysis]);
+  }, [moves, positions, startFen, bookPlies, gameId, storedAnalysis]);
 
   // ---- effects when you land on a move ------------------------------------
   const goTo = useCallback(
@@ -675,6 +682,8 @@ export default function ReviewSequence({
               </div>
             )}
           </div>
+
+          {extra}
 
           <p className="px-1 text-[10px] uppercase tracking-wider text-[var(--muted)]">
             Stockfish 19 · 600 ms per position · 2 workers · MultiPV 2

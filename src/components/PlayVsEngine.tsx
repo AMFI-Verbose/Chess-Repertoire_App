@@ -7,16 +7,39 @@ import { Chess } from "chess.js";
 
 import ModeTabs from "@/components/ModeTabs";
 import GameSetup, { type StartConfig } from "@/components/GameSetup";
-import { saveEngineGame } from "@/app/actions";
+import { saveEngineGame, type SaveGameInput } from "@/app/actions";
 import { Engine } from "@/lib/engine";
 import { START_FEN, tryMove, turnOf } from "@/lib/chess";
 import { DARK_SQUARE, LIGHT_SQUARE } from "@/lib/boardTheme";
 import { hintStyles } from "@/lib/boardHints";
 import { play } from "@/lib/sound";
-import { formatClock, timeControlById } from "@/lib/gameOptions";
+import { formatClock, levelByNumber, timeControlById } from "@/lib/gameOptions";
 import { DEFAULT_BOT, botById, chooseBotMove } from "@/lib/bots";
 import { botChatLine, botReply, type ChatEvent } from "@/lib/botChat";
 import BotChat, { type ChatMessage } from "@/components/BotChat";
+
+/** Where finished games wait when the server will not take them. */
+const QUEUE_KEY = "chess.unsaved.games.v1";
+
+function readQueue(): SaveGameInput[] {
+  try {
+    const raw = window.localStorage.getItem(QUEUE_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw) as unknown;
+    return Array.isArray(parsed) ? (parsed as SaveGameInput[]) : [];
+  } catch {
+    return [];
+  }
+}
+
+function writeQueue(list: SaveGameInput[]) {
+  try {
+    if (list.length === 0) window.localStorage.removeItem(QUEUE_KEY);
+    else window.localStorage.setItem(QUEUE_KEY, JSON.stringify(list));
+  } catch {
+    // Storage full or disabled — the in-memory retry still works.
+  }
+}
 
 type Status = "playing" | "ended";
 type Phase = "setup" | "game";
@@ -34,6 +57,10 @@ export default function PlayVsEngine({
   const [phase, setPhase] = useState<Phase>("setup");
 
   // --- what was chosen in the setup panel ---
+  const [opponent, setOpponent] = useState<"stockfish" | "character">("stockfish");
+  // Remembered so the setup screen reopens where you left off.
+  const [lastConfig, setLastConfig] = useState<StartConfig | null>(null);
+  const [level, setLevel] = useState(4);
   const [botId, setBotId] = useState(DEFAULT_BOT.id);
   const [tcId, setTcId] = useState("5+3");
   const [youPlay, setYouPlay] = useState<"w" | "b">(side === "black" ? "b" : "w");
@@ -50,6 +77,10 @@ export default function PlayVsEngine({
   const [evalCp, setEvalCp] = useState<number | null>(null);
   const [savedId, setSavedId] = useState<string | null>(null);
   const [saveError, setSaveError] = useState(false);
+  const [saveErrorText, setSaveErrorText] = useState<string | null>(null);
+  // Finished games that the server refused. They wait here — across reloads —
+  // until a write succeeds, so a flaky moment never costs you the game.
+  const [queued, setQueued] = useState(0);
   // A pawn reaching the last rank waits here until you pick a piece.
   const [promotion, setPromotion] = useState<{ from: string; to: string } | null>(null);
   const [resultDismissed, setResultDismissed] = useState(false);
@@ -66,6 +97,7 @@ export default function PlayVsEngine({
 
   const engineRef = useRef<Engine | null>(null);
   const searchingFor = useRef<string | null>(null);
+  const epoch = useRef(0);
   const evalToken = useRef(0);
   const statusRef = useRef<Status>("playing");
   const savedRef = useRef<string | null>(null);
@@ -82,6 +114,11 @@ export default function PlayVsEngine({
   statusRef.current = status;
 
   const bot = botById(botId);
+  // "stockfish" is the bare engine ladder; "character" is the same engine with
+  // a face, a handicap and opinions. Everything below branches on this.
+  const isCharacter = opponent === "character";
+  const engineLevel = levelByNumber(level);
+  const opponentName = isCharacter ? bot.name : "Stockfish";
   const timeControl = timeControlById(tcId);
   const clockOn = timeControl.initial !== null;
 
@@ -111,7 +148,10 @@ export default function PlayVsEngine({
     const control = timeControlById(config.tcId);
     const baseMs = control.initial === null ? 0 : control.initial * 1000;
 
-    setBotId(config.botId);
+    setLastConfig(config);
+    setOpponent(config.opponent);
+    setLevel(config.level);
+    setBotId(config.botId || DEFAULT_BOT.id);
     setTcId(config.tcId);
     setYouPlay(resolved);
     setStartFen(start);
@@ -124,6 +164,7 @@ export default function PlayVsEngine({
     setEvalCp(null);
     setSavedId(null);
     setSaveError(false);
+    setSaveErrorText(null);
     setPromotion(null);
     setResultDismissed(false);
     setChat([]);
@@ -134,6 +175,7 @@ export default function PlayVsEngine({
     setBlackMs(baseMs);
 
     searchingFor.current = null;
+    epoch.current += 1;
     savedRef.current = null;
     tickRef.current = Date.now();
     setPhase("game");
@@ -155,6 +197,8 @@ export default function PlayVsEngine({
    */
   const speak = useCallback(
     (event: ChatEvent, force = false, detail?: string) => {
+      // The bare engine has nothing to say.
+      if (!isCharacter) return;
       if (!force && moves.length - lastSpokeAt.current < 4) return;
       const line = botChatLine(bot, event, { detail });
       if (!line) return;
@@ -162,17 +206,17 @@ export default function PlayVsEngine({
       // A beat of "thinking" makes it feel typed rather than triggered.
       setTimeout(() => pushChat("bot", line), 700);
     },
-    [bot, moves.length, pushChat],
+    [bot, isCharacter, moves.length, pushChat],
   );
 
   // A new game opens with the character saying hello.
   useEffect(() => {
-    if (phase !== "game") return;
+    if (phase !== "game" || !isCharacter) return;
     const line = botChatLine(bot, "start");
     if (!line) return;
     const timer = setTimeout(() => pushChat("bot", line), 700);
     return () => clearTimeout(timer);
-  }, [phase, gameSeq, bot, pushChat]);
+  }, [phase, gameSeq, bot, isCharacter, pushChat]);
 
   /** What the finished result means for this character. */
   const endEvent = useCallback((text: string | null): ChatEvent => {
@@ -200,6 +244,44 @@ export default function PlayVsEngine({
     [bot, pushChat],
   );
 
+  /** Finished games waiting for a write that worked. */
+  const enqueue = useCallback((payload: SaveGameInput) => {
+    const list = readQueue();
+    list.push(payload);
+    writeQueue(list);
+    setQueued(list.length);
+  }, []);
+
+  /** Try the waiting games again; whatever succeeds leaves the queue. */
+  const flushQueue = useCallback(async () => {
+    const list = readQueue();
+    if (list.length === 0) {
+      setQueued(0);
+      return;
+    }
+    const leftovers: SaveGameInput[] = [];
+    for (const payload of list) {
+      try {
+        await saveEngineGame(payload);
+      } catch {
+        leftovers.push(payload);
+      }
+    }
+    writeQueue(leftovers);
+    setQueued(leftovers.length);
+    if (list.length > leftovers.length) {
+      // Something got through — reload the list so it shows up.
+      window.location.reload();
+    }
+  }, []);
+
+  // On mount, quietly retry anything a previous session could not save.
+  useEffect(() => {
+    const waiting = readQueue();
+    setQueued(waiting.length);
+    if (waiting.length > 0) void flushQueue();
+  }, [flushQueue]);
+
   /** Write the finished game to the database — exactly once per game. */
   const persist = useCallback(
     (
@@ -212,32 +294,40 @@ export default function PlayVsEngine({
       // Resigning before the first move is not a game worth remembering.
       if (list.length === 0) return;
       pendingRef.current = { list, finalFen, outcome, text };
-      savedRef.current = "saving";
-      setSaveError(false);
-      saveEngineGame({
+      const payload: SaveGameInput = {
         playerColor: youPlay === "w" ? "white" : "black",
-        skill: bot.play.skill,
-        level: bot.level,
-        botId: bot.id,
+        skill: isCharacter ? bot.play.skill : engineLevel.skill,
+        level: isCharacter ? bot.level : engineLevel.level,
+        botId: isCharacter ? bot.id : undefined,
         timeControl: clockOn ? tcId : "unlimited",
         startFen: startFen === START_FEN ? "" : startFen,
         result: outcome,
         resultText: text,
         san: list.map((move) => move.san),
         fen: finalFen,
-      })
+      };
+      savedRef.current = "saving";
+      setSaveError(false);
+      setSaveErrorText(null);
+      saveEngineGame(payload)
         .then(({ id }) => {
           savedRef.current = id;
           setSavedId(id);
         })
-        .catch(() => {
-          // The move list is still in pendingRef: show the failure rather than
-          // a spinner that never finishes.
+        .catch((error: unknown) => {
+          const reason =
+            error instanceof Error
+              ? error.message.replace(/^Error: /, "").slice(0, 140)
+              : "The server refused the write.";
+          // The move list is still in pendingRef, and it also goes to local
+          // storage so even a reload cannot lose a finished game.
           savedRef.current = null;
           setSaveError(true);
+          setSaveErrorText(reason);
+          enqueue(payload);
         });
     },
-    [youPlay, bot.play.skill, bot.level, bot.id, tcId, clockOn, startFen],
+    [youPlay, isCharacter, bot.play.skill, bot.level, bot.id, engineLevel.skill, engineLevel.level, tcId, clockOn, startFen, enqueue],
   );
 
   const retrySave = useCallback(() => {
@@ -315,11 +405,24 @@ export default function PlayVsEngine({
     searchingFor.current = fen;
     setThinking(true);
 
+    // If the board is rewound while this search is in flight, its answer is
+    // about a position that no longer exists — drop it instead of playing it.
+    const startedIn = epoch.current;
     let cancelled = false;
 
-    chooseBotMove(getEngine(), fen, bot)
+    const searched = isCharacter
+      ? chooseBotMove(getEngine(), fen, bot)
+      : getEngine()
+          .search(fen, {
+            movetime: engineLevel.movetime,
+            skill: engineLevel.skill,
+          })
+          .then((result) => result.bestmove);
+
+    searched
       .then((uci) => {
         if (cancelled || statusRef.current !== "playing") return;
+        if (epoch.current !== startedIn) return;
         if (!uci || uci.startsWith("(")) {
           setStatus("ended");
           setResult("Stockfish resigned");
@@ -336,7 +439,7 @@ export default function PlayVsEngine({
     return () => {
       cancelled = true;
     };
-  }, [phase, fen, youPlay, status, bot, commitMove, getEngine, moves, persist]);
+  }, [phase, fen, youPlay, status, isCharacter, bot, engineLevel.movetime, engineLevel.skill, commitMove, getEngine, moves, persist]);
 
   // ---- clock -------------------------------------------------------------
   useEffect(() => {
@@ -456,6 +559,9 @@ export default function PlayVsEngine({
 
   function undo() {
     if (moves.length === 0) return;
+    // Bump first: any engine search already in flight is now obsolete.
+    epoch.current += 1;
+    setThinking(false);
     // Take back your move *and* the engine's reply when there is one.
     const strip = turnOf(fen) === youPlay ? 2 : 1;
     const kept = moves.slice(0, Math.max(0, moves.length - strip));
@@ -509,10 +615,12 @@ export default function PlayVsEngine({
           </h1>
           <p className="text-sm text-[var(--muted)]">
             {phase === "game"
-              ? `vs ${bot.name} (≈${bot.rating}) · ${
+              ? `vs ${opponentName}${
+                  isCharacter ? ` (≈${bot.rating})` : ` · level ${engineLevel.level} (${engineLevel.name})`
+                } · ${
                   clockOn ? `${timeControl.label} ${timeControl.category}` : "no clock"
                 }${startFen === START_FEN ? "" : " · custom position"}`
-              : "Pick an opponent, a clock and a colour — or click a quick pairing to start against Marlow straight away."}
+              : "Pick Stockfish or a character, a clock and a colour — or click a quick pairing."}
           </p>
         </div>
         {repertoireId ? <ModeTabs repertoireId={repertoireId} active="play" /> : null}
@@ -520,7 +628,21 @@ export default function PlayVsEngine({
 
       {phase === "setup" ? (
         <div className="mx-auto w-full max-w-2xl">
-          <GameSetup onStart={startGame} defaultLevel={4} />
+          <GameSetup
+            onStart={startGame}
+            defaultLevel={4}
+            initial={
+              lastConfig
+                ? {
+                    opponent: lastConfig.opponent,
+                    level: lastConfig.level,
+                    botId: lastConfig.botId,
+                    tcId: lastConfig.tcId,
+                    colour: lastConfig.colour,
+                  }
+                : null
+            }
+          />
         </div>
       ) : (
         <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_320px]">
@@ -538,10 +660,21 @@ export default function PlayVsEngine({
                   <p className="text-[11px] uppercase tracking-[0.16em] text-[var(--muted)]">
                     Game over
                   </p>
-                  <p className="mt-1 text-xl font-semibold">{result ?? "Game over"}</p>
+                  <div className="mt-1 flex items-center gap-2.5">
+                    {isCharacter ? (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img
+                        src={bot.avatar}
+                        alt={bot.name}
+                        className="h-9 w-9 rounded-full object-cover"
+                        style={{ boxShadow: `0 0 0 1px ${bot.accent}` }}
+                      />
+                    ) : null}
+                    <p className="text-xl font-semibold">{result ?? "Game over"}</p>
+                  </div>
                   <p className="mt-1 text-xs text-[var(--muted)]">
                     {moves.length} {moves.length === 1 ? "move" : "moves"} ·
-                    {bot.name}
+                    {opponentName}
                     {clockOn ? ` · ${timeControl.label}` : ""}
                   </p>
                   <div className="mt-4 flex flex-col gap-2">
@@ -553,12 +686,30 @@ export default function PlayVsEngine({
                         Analyse this game →
                       </Link>
                     ) : moves.length === 0 ? null : saveError ? (
-                      <button
-                        onClick={retrySave}
-                        className="rounded-lg border border-[#e0564b] px-3 py-2 text-sm text-[#e0564b]"
-                      >
-                        Couldn&apos;t save — retry
-                      </button>
+                      <div className="flex flex-col gap-1">
+                        <button
+                          onClick={retrySave}
+                          className="rounded-lg border border-[#e0564b] px-3 py-2 text-sm text-[#e0564b]"
+                        >
+                          Couldn&apos;t save — retry
+                        </button>
+                        {saveErrorText ? (
+                          <p className="text-[10px] leading-relaxed text-[var(--muted)]">
+                            {saveErrorText}
+                          </p>
+                        ) : null}
+                        {queued > 0 ? (
+                          <p className="text-[10px] text-[var(--muted)]">
+                            {queued} game{queued === 1 ? "" : "s"} kept locally —{" "}
+                            <button
+                              onClick={() => void flushQueue()}
+                              className="underline"
+                            >
+                              try again
+                            </button>
+                          </p>
+                        ) : null}
+                      </div>
                     ) : (
                       <span className="rounded-lg border border-[var(--line)] px-3 py-2 text-center text-sm text-[var(--muted)]">
                         Saving for analysis…
@@ -620,10 +771,14 @@ export default function PlayVsEngine({
             {clockOn && (
               <div className="w-full max-w-[600px]">
                 <ClockCard
-                  label={bot.name}
-                  avatar={bot.avatar}
-                  accent={bot.accent}
-                  sub={`≈${bot.rating} · ${timeControl.category}`}
+                  label={opponentName}
+                  avatar={isCharacter ? bot.avatar : undefined}
+                  accent={isCharacter ? bot.accent : undefined}
+                  sub={
+                    isCharacter
+                      ? `≈${bot.rating} · ${timeControl.category}`
+                      : `Level ${engineLevel.level} · ≈${engineLevel.rating} · ${timeControl.category}`
+                  }
                   value={formatClock(theirMs)}
                   active={status === "playing" && !yourTurn}
                   low={theirMs < 20000}
@@ -670,7 +825,7 @@ export default function PlayVsEngine({
               {result
                 ? result
                 : thinking
-                  ? "Stockfish is thinking…"
+                  ? `${opponentName} is thinking…`
                   : yourTurn
                     ? "Your move"
                     : "…"}
@@ -678,7 +833,9 @@ export default function PlayVsEngine({
           </section>
 
           <aside className="flex flex-col gap-4">
-            <BotChat bot={bot} messages={chat} onSend={sendChat} />
+            {isCharacter ? (
+              <BotChat bot={bot} messages={chat} onSend={sendChat} />
+            ) : null}
 
             <div className="rounded-xl border border-[var(--line)] bg-[var(--panel)] p-4">
               <div className="flex items-center justify-between text-xs text-[var(--muted)]">
@@ -709,11 +866,11 @@ export default function PlayVsEngine({
                 Game
               </p>
               <p className="mt-1 text-sm font-medium">
-                {bot.name} · {bot.style}
+                {isCharacter ? `${bot.name} · ${bot.style}` : `Stockfish · ${engineLevel.name}`}
               </p>
               <p className="mt-0.5 text-xs text-[var(--muted)]">
                 {clockOn ? `${timeControl.label} ${timeControl.category}` : "No clock"} ·
-                ≈{bot.rating} Elo · {bot.style}
+                {isCharacter ? `≈${bot.rating} Elo · ${bot.style}` : `level ${engineLevel.level} · skill ${engineLevel.skill}`}
               </p>
             </div>
 
@@ -726,7 +883,7 @@ export default function PlayVsEngine({
               </button>
               <button
                 onClick={undo}
-                disabled={moves.length === 0}
+                disabled={moves.length === 0 || status === "ended"}
                 className="rounded-lg border border-[var(--line)] px-3 py-2 text-xs text-[var(--text)] disabled:opacity-40"
               >
                 Take back
@@ -753,7 +910,7 @@ export default function PlayVsEngine({
                 {moves.length > 0 && (
                   <p className="mt-1 text-xs text-[var(--muted)]">
                     {Math.ceil(moves.length / 2)}{" "}
-                    {Math.ceil(moves.length / 2) === 1 ? "move" : "moves"} · {bot.name}
+                    {Math.ceil(moves.length / 2) === 1 ? "move" : "moves"} · {opponentName}
                     {clockOn ? ` · ${timeControl.label}` : ""}
                   </p>
                 )}

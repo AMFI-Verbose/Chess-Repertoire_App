@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { prisma } from "@/lib/prisma";
 import { createRepertoire } from "./actions";
-import { botById } from "@/lib/bots";
+import { opponentLabel } from "@/lib/bots";
 
 // Read from the database on every request — never serve a stale cached page.
 export const dynamic = "force-dynamic";
@@ -74,14 +74,20 @@ export default async function DashboardPage() {
         <p className="mt-2 max-w-xl text-sm leading-relaxed text-[var(--muted)]">
           Build the opening lines you actually play, branch them where they
           diverge, keep a note on every position — then test them against
-          Stockfish and grade every move in review.
+          Stockfish or one of eight characters, and grade every move in review.
         </p>
         <div className="mt-5 flex flex-wrap gap-2">
           <Link
             href="/play"
             className="rounded-lg bg-[var(--accent)] px-4 py-2 text-sm font-semibold text-[#0b1602] transition hover:brightness-110"
           >
-            Play a character →
+            Play Stockfish →
+          </Link>
+          <Link
+            href="/play#characters"
+            className="rounded-lg border border-[var(--line)] px-4 py-2 text-sm transition hover:border-[var(--accent)]"
+          >
+            Play a character
           </Link>
           <Link
             href="/games"
@@ -254,7 +260,7 @@ export default async function DashboardPage() {
                         {game.result === "win" ? "WIN" : game.result === "loss" ? "LOSS" : "DRAW"}
                       </span>
                       <span className="min-w-0 flex-1 truncate text-xs">
-                        vs {botById(game.botId).name} · {game.timeControl} ·{" "}
+                        vs {opponentLabel(game.botId, game.level)} · {game.timeControl} ·{" "}
                         {Math.ceil(game.plies / 2)}{" "}
                         {Math.ceil(game.plies / 2) === 1 ? "move" : "moves"}
                       </span>
