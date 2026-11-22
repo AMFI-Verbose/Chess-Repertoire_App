@@ -204,7 +204,7 @@ def main() -> None:
 
     # ---- header -------------------------------------------------------------
     d.text((MARGIN, 54 * S), "Chess Repertoire — development workflow", font=F_TITLE, fill=COL["text"])
-    span = f"{len(items)} commits · {blocks[0][3]:%d %b} → {items[0]['when']:%d %b %Y} · Next.js 15 · Stockfish 19 · Prisma / SQLite"
+    span = f"{len(items)} commits · {blocks[0][3]:%d %b} → {items[0]['when']:%d %b %Y} · Next.js 15 · Stockfish 19 · Prisma / PostgreSQL"
     d.text((MARGIN, 118 * S), span, font=F_SUB, fill=COL["muted"])
 
     chips = [
