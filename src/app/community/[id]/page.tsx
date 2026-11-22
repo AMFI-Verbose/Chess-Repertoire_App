@@ -2,6 +2,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 
 import { getStudy } from "@/app/actions";
+import { getViewer } from "@/lib/auth";
 import StudyViewer from "@/components/StudyViewer";
 
 export const dynamic = "force-dynamic";
@@ -12,7 +13,7 @@ export default async function StudyPage({
   params: Promise<{ id: string }>;
 }) {
   const { id } = await params;
-  const study = await getStudy(id);
+  const [study, viewer] = await Promise.all([getStudy(id), getViewer()]);
 
   if (!study) notFound();
 
@@ -27,7 +28,10 @@ export default async function StudyPage({
         </Link>
       </header>
 
-      <StudyViewer study={study} />
+      <StudyViewer
+        study={study}
+        viewer={viewer ? { id: viewer.id, handle: viewer.handle } : null}
+      />
     </main>
   );
 }

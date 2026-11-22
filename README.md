@@ -135,6 +135,34 @@ so it is graded on what it costs.
 |---|---|
 | A fresh tactic every day from Lichess's public API, plus an **offline library of 30,000 tactics** imported from Lichess's public puzzle database. Practice difficulty tracks your Elo, and every attempt moves a rating (K = 40 / 32 / 24). Streak and accuracy stored in SQLite. | Annotated games (Morphy 1858, Anderssen 1851, Légal's trap) plus **your own games, published from the review page**. Search by title, idea or author, sort by newest / most discussed / A–Z, step through with ← / →, pin a note to the exact move you are looking at, jump back to any annotated position, or copy the whole game into a new repertoire in one click. |
 
+### Real accounts, and a real Lichess feed
+
+The community used to be a seeded library with a name-typed comment box. It now
+has accounts and a live feed:
+
+- **Accounts** — `/signup` creates a user (email + public handle + password).
+  Passwords are salted and hashed with `scrypt`; sessions are random tokens in
+  the `Session` table, carried in an `httpOnly` cookie, and expire after 30 days.
+  Reading the community never needs an account; publishing a study, writing a
+  note and unpublishing your own study do.
+- **Ownership** — a study stores `userId`, so "Unpublish" only appears for the
+  account that published it. Seeded and imported studies have no owner and
+  cannot be deleted from the UI.
+- **Lichess import** — `scripts/import-lichess.mjs` pulls finished standard
+  games from (1) broadcast rounds of top events and (2) the arena tournaments
+  that just finished, replays every PGN with chess.js, keeps the strongest by
+  average Elo, and stores them with `source = "lichess"`, the opener name, both
+  ratings and a link back to the game. Each game is keyed by its Lichess id, so
+  running the import twice never duplicates anything. The shelf rotates: past
+  220 imported games, the oldest ones without comments are dropped.
+- **Every morning** — a launchd agent
+  (`~/Library/LaunchAgents/com.cjpeng.chess-lichess.plist`) runs
+  `scripts/run-lichess-import.sh` at 07:20, logging to `/tmp/chess-lichess.log`.
+  Run it by hand with `npm run lichess:import`.
+
+The community index filters by source (All / Lichess / Players), by author, and
+sorts by newest, most discussed or A–Z.
+
 ### The puzzle library
 
 `npm run db:puzzles` streams Lichess's 5M-row puzzle archive through `zstd`,
@@ -198,6 +226,12 @@ on the machine actually has Pillow (Homebrew's Python ships without it).
 | ![Learn](docs/screenshots/learn-overview.png) | ![Lesson](docs/screenshots/learn-lesson.png) |
 | ![Train](docs/screenshots/train.png) | ![Train session](docs/screenshots/train-session.png) |
 
+| Community, with Lichess games | A real Lichess game |
+|---|---|
+| ![Community](docs/screenshots/community.png) | ![Lichess study](docs/screenshots/community-lichess.png) |
+| **Accounts** | |
+| ![Signup](docs/screenshots/signup.png) | |
+
 ---
 
 ## Quick start
@@ -211,8 +245,9 @@ npm run db:setup       # database + 2 sample repertoires + 3,865 openings + puzz
 npm run dev            # http://localhost:3000
 ```
 
-Requires Node.js 20+. No engine binary, no account, no API key — Stockfish is
-copied out of `node_modules` automatically by `predev` / `prebuild`.
+Requires Node.js 20+. No engine binary, no external account, no API key —
+Stockfish is copied out of `node_modules` automatically by `predev` / `prebuild`,
+and community accounts are created locally in your own database.
 
 ### Commands
 
@@ -224,6 +259,7 @@ copied out of `node_modules` automatically by `predev` / `prebuild`.
 | `npm run db:openings` | Re-download the Lichess ECO table (needs network) |
 | `npm run db:seed` | Recreate the two sample repertoires |
 | `npm run db:content` | Load the built-in seeded puzzles and study library |
+| `npm run lichess:import` | Pull today's real Lichess games into the community (network) |
 | `npm run db:puzzles` | Import tactics from Lichess's puzzle archive (needs `.cache/…csv.zst`) |
 | `npm run db:reset` | Wipe + migrate + reseed everything |
 

@@ -6,6 +6,7 @@ import Link from "next/link";
 import type { StudySummary } from "@/app/actions";
 
 type Sort = "newest" | "discussed" | "title";
+type Source = "all" | "lichess" | "local";
 
 const SORTS: { id: Sort; label: string }[] = [
   { id: "newest", label: "Newest" },
@@ -22,6 +23,7 @@ export default function CommunityBrowser({ studies }: { studies: StudySummary[] 
   const [query, setQuery] = useState("");
   const [sort, setSort] = useState<Sort>("newest");
   const [author, setAuthor] = useState("");
+  const [source, setSource] = useState<Source>("all");
 
   const authors = useMemo(() => {
     const seen = new Set<string>();
@@ -32,6 +34,8 @@ export default function CommunityBrowser({ studies }: { studies: StudySummary[] 
   const visible = useMemo(() => {
     const needle = query.trim().toLowerCase();
     const rows = studies.filter((study) => {
+      if (source === "lichess" && study.source !== "lichess") return false;
+      if (source === "local" && study.source !== "local") return false;
       if (author && study.author !== author) return false;
       if (!needle) return true;
       return [study.title, study.subtitle, study.author]
@@ -45,7 +49,7 @@ export default function CommunityBrowser({ studies }: { studies: StudySummary[] 
       if (sort === "title") return a.title.localeCompare(b.title);
       return b.createdAt.localeCompare(a.createdAt);
     });
-  }, [studies, query, sort, author]);
+  }, [studies, query, sort, author, source]);
 
   return (
     <div className="flex flex-col gap-4">
@@ -80,6 +84,28 @@ export default function CommunityBrowser({ studies }: { studies: StudySummary[] 
         )}
 
         <div className="flex rounded-lg border border-[var(--line)] bg-[var(--panel)] p-0.5">
+          {(
+            [
+              ["all", "All"],
+              ["lichess", "Lichess"],
+              ["local", "Players"],
+            ] as [Source, string][]
+          ).map(([id, label]) => (
+            <button
+              key={id}
+              onClick={() => setSource(id)}
+              className={`rounded-md px-2.5 py-1.5 text-[11px] transition ${
+                source === id
+                  ? "bg-[var(--accent)] text-[#04231d]"
+                  : "text-[var(--muted)] hover:text-[var(--text)]"
+              }`}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+
+        <div className="flex rounded-lg border border-[var(--line)] bg-[var(--panel)] p-0.5">
           {SORTS.map((option) => (
             <button
               key={option.id}
@@ -109,6 +135,7 @@ export default function CommunityBrowser({ studies }: { studies: StudySummary[] 
               onClick={() => {
                 setQuery("");
                 setAuthor("");
+                setSource("all");
               }}
               className="mt-3 rounded-lg border border-[var(--line)] px-3 py-1.5 text-xs text-[var(--muted)] transition hover:text-[var(--text)]"
             >
@@ -135,6 +162,11 @@ export default function CommunityBrowser({ studies }: { studies: StudySummary[] 
                 {study.eco && (
                   <span className="rounded-md border border-[var(--line)] px-1.5 py-0.5 text-[10px] text-[var(--muted)]">
                     {study.eco}
+                  </span>
+                )}
+                {study.source === "lichess" && (
+                  <span className="rounded-md border border-[var(--accent)]/50 px-1.5 py-0.5 text-[10px] text-[var(--accent)]">
+                    Lichess
                   </span>
                 )}
               </div>

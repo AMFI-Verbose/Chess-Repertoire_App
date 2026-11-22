@@ -239,6 +239,7 @@ async function main() {
           subtitle: entry.subtitle,
           eco: entry.eco,
           author: "Community",
+          source: "seed",
         },
       });
       // Backfill the move each seeded note is about, so an older database
@@ -260,6 +261,7 @@ async function main() {
         eco: entry.eco,
         pgn: entry.pgn,
         author: "Community",
+        source: "seed",
         comments: {
           create: entry.comments.map((comment) => ({
             author: comment.author,
