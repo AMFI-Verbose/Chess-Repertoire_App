@@ -131,6 +131,7 @@ export async function createDuel(input: {
   timeControl: string;
   color: "white" | "black" | "random";
   visibility: "public" | "private";
+  tournamentId?: string;
 }) {
   const hostColor =
     input.color === "random" ? (Math.random() < 0.5 ? "white" : "black") : input.color;
@@ -151,6 +152,7 @@ export async function createDuel(input: {
       hostColor,
       visibility: input.visibility,
       timeControl: input.timeControl,
+      tournamentId: input.tournamentId ?? null,
       clocked,
       whiteMs: startMs,
       blackMs: startMs,
@@ -198,6 +200,34 @@ function finish(
   };
 }
 
+/** Arena points: a win is 2, a draw is 1 for each side. */
+async function awardTournamentPoints(
+  duel: { tournamentId: string | null; hostId: string; guestId: string | null; hostColor: string },
+  winner: "white" | "black" | "draw",
+) {
+  if (!duel.tournamentId || !duel.guestId) return;
+  const hostIsWhite = duel.hostColor === "white";
+  const whiteId = hostIsWhite ? duel.hostId : duel.guestId;
+  const blackId = hostIsWhite ? duel.guestId : duel.hostId;
+
+  const entries =
+    winner === "draw"
+      ? [
+          { userId: whiteId, points: 1 },
+          { userId: blackId, points: 1 },
+        ]
+      : [{ userId: winner === "white" ? whiteId : blackId, points: 2 }];
+
+  await Promise.all(
+    entries.map((entry) =>
+      prisma.tournamentEntry.updateMany({
+        where: { tournamentId: duel.tournamentId!, userId: entry.userId },
+        data: { score: { increment: entry.points } },
+      }),
+    ),
+  );
+}
+
 export async function moveDuel(input: {
   code: string;
   userId: string;
@@ -205,7 +235,7 @@ export async function moveDuel(input: {
   to: string;
   promotion?: "q" | "r" | "b" | "n";
 }): Promise<{ ok: true; state: DuelState } | { ok: false; error: string }> {
-  const duel = await prisma.duel.findUnique({ where: { code: input.code }, select: { ...SELECT, id: true, hostId: true, guestId: true } });
+  const duel = await prisma.duel.findUnique({ where: { code: input.code }, select: { ...SELECT, id: true, hostId: true, guestId: true, tournamentId: true } });
   if (!duel) return { ok: false, error: "This game does not exist." };
   if (duel.status !== "playing") return { ok: false, error: "This game is not in progress." };
   if (duel.hostId !== input.userId && duel.guestId !== input.userId) {
@@ -236,6 +266,7 @@ export async function moveDuel(input: {
         data: { ...finished, lastMoveAt: new Date() },
         select: SELECT,
       });
+      await awardTournamentPoints(duel, finished.winner);
       return { ok: true, state: toState(row) };
     }
   }
@@ -296,23 +327,26 @@ export async function moveDuel(input: {
     select: SELECT,
   });
 
+  if (winner) await awardTournamentPoints(duel, winner);
   return { ok: true, state: toState(row) };
 }
 
 export async function resignDuel(code: string, userId: string): Promise<DuelState> {
-  const duel = await prisma.duel.findUnique({ where: { code }, select: { ...SELECT, id: true, hostId: true, guestId: true } });
+  const duel = await prisma.duel.findUnique({ where: { code }, select: { ...SELECT, id: true, hostId: true, guestId: true, tournamentId: true } });
   if (!duel) throw new Error("This game does not exist.");
   if (duel.status !== "playing") throw new Error("This game is not in progress.");
   const yourColor = colorOf(duel, userId);
+  const winner = yourColor === "white" ? "black" : "white";
   const row = await prisma.duel.update({
     where: { id: duel.id },
     data: {
       status: "finished",
-      winner: yourColor === "white" ? "black" : "white",
+      winner,
       resultText: `${yourColor === "white" ? "White" : "Black"} resigned`,
     },
     select: SELECT,
   });
+  await awardTournamentPoints(duel, winner);
   return toState(row);
 }
 

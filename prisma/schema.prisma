@@ -154,6 +154,8 @@ model Duel {
   id          String    @id @default(cuid())
   code        String    @unique
   visibility  String    @default("public") // "public" | "private"
+  tournamentId String?
+  tournament   Tournament? @relation(fields: [tournamentId], references: [id], onDelete: SetNull)
   status      String    @default("open") // open | playing | finished | cancelled
   hostId      String
   host        User      @relation("DuelHost", fields: [hostId], references: [id], onDelete: Cascade)
@@ -174,6 +176,7 @@ model Duel {
   updatedAt   DateTime  @updatedAt
 
   @@index([status, visibility, createdAt])
+  @@index([tournamentId])
   @@index([guestId])
 }
 
@@ -279,4 +282,51 @@ model RateLimit {
   windowStart DateTime
 
   @@index([windowStart])
+}
+
+
+model Donation {
+  id          String   @id @default(cuid())
+  name        String   @default("Anonymous")
+  amountCents Int
+  recurring   Boolean  @default(false)
+  message     String   @default("")
+  createdAt   DateTime @default(now())
+
+  @@index([createdAt])
+}
+
+model SwagOrder {
+  id         String   @id @default(cuid())
+  name       String
+  email      String
+  items      Json
+  totalCents Int
+  status     String   @default("placed")
+  createdAt  DateTime @default(now())
+}
+
+model Tournament {
+  id          String   @id @default(cuid())
+  name        String
+  startsAt    DateTime
+  endsAt      DateTime
+  timeControl String   @default("3+2")
+  createdAt   DateTime @default(now())
+  entries     TournamentEntry[]
+  duels       Duel[]
+
+  @@index([endsAt])
+}
+
+model TournamentEntry {
+  id           String     @id @default(cuid())
+  tournamentId String
+  tournament   Tournament @relation(fields: [tournamentId], references: [id], onDelete: Cascade)
+  userId       String
+  score        Float      @default(0)
+  joinedAt     DateTime   @default(now())
+
+  @@unique([tournamentId, userId])
+  @@index([tournamentId, score])
 }
