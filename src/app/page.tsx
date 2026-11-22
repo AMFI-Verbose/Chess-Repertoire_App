@@ -1,4 +1,8 @@
 import Link from "next/link";
+import { listStudies } from "@/app/actions";
+import MiniBoard from "@/components/MiniBoard";
+import { getViewer } from "@/lib/auth";
+import { listOpenDuels } from "@/lib/duels";
 import { prisma } from "@/lib/prisma";
 import { createRepertoire } from "./actions";
 import { opponentLabel } from "@/lib/bots";
@@ -8,6 +12,7 @@ import { getTrainOverview } from "@/app/train/actions";
 export const dynamic = "force-dynamic";
 
 export default async function DashboardPage() {
+  const viewer = await getViewer();
   const train = await getTrainOverview();
   const trainDue = train.reduce((sum, item) => sum + item.due + item.fresh, 0);
 
@@ -20,6 +25,10 @@ export default async function DashboardPage() {
     profile,
     gameCount,
     recentGames,
+    studies,
+    openDuels,
+    dailyPuzzle,
+    members,
   ] = await Promise.all([
       prisma.repertoire.findMany({
         orderBy: { updatedAt: "desc" },
@@ -50,6 +59,14 @@ export default async function DashboardPage() {
           createdAt: true,
         },
       }),
+      listStudies(),
+      listOpenDuels(),
+      prisma.puzzle.findFirst({
+        where: { day: { not: null } },
+        orderBy: { day: "desc" },
+        select: { id: true, fen: true, title: true, rating: true, day: true },
+      }),
+      prisma.user.count(),
     ]);
 
   let streak = 0;
@@ -378,6 +395,131 @@ export default async function DashboardPage() {
           </form>
         </aside>
       </div>
+
+      <section className="mt-12 border-t border-[var(--line)] pt-8">
+        <div className="grid gap-4 lg:grid-cols-[minmax(0,1.55fr)_minmax(0,1fr)_minmax(0,1.1fr)]">
+          {/* Daily puzzle — the one board everyone gets today. */}
+          <div className="rounded-xl border border-[var(--line)] bg-[var(--panel)] p-4">
+            <div className="mb-3 flex items-baseline justify-between">
+              <h2 className="text-[11px] font-medium uppercase tracking-wider text-[var(--muted)]">
+                Puzzle of the day
+              </h2>
+              <Link href="/puzzles" className="text-[11px] text-[var(--accent)]">
+                Solve it →
+              </Link>
+            </div>
+            <Link href="/puzzles" className="group flex items-start gap-4">
+              {dailyPuzzle ? (
+                <MiniBoard fen={dailyPuzzle.fen} size={196} />
+              ) : (
+                <div className="flex h-[196px] w-[196px] items-center justify-center rounded-md border border-dashed border-[var(--line)] text-[11px] text-[var(--muted)]">
+                  No puzzle imported yet
+                </div>
+              )}
+              <div className="min-w-0">
+                <p className="text-sm font-medium">
+                  {dailyPuzzle?.title || "Daily tactic"}
+                </p>
+                <p className="mt-1 text-[11px] leading-relaxed text-[var(--muted)]">
+                  {dailyPuzzle
+                    ? `Rated ${dailyPuzzle.rating} · ${dailyPuzzle.fen.split(" ")[1] === "w" ? "White" : "Black"} to play`
+                    : "Import the daily Lichess puzzle to start a streak."}
+                </p>
+                <p className="mt-3 text-[11px] text-[var(--accent)] transition group-hover:translate-x-0.5">
+                  Find the best move →
+                </p>
+              </div>
+            </Link>
+          </div>
+
+          {/* Open lobby — a real person can be waiting right now. */}
+          <div className="rounded-xl border border-[var(--line)] bg-[var(--panel)] p-4">
+            <div className="mb-2 flex items-baseline justify-between">
+              <h2 className="text-[11px] font-medium uppercase tracking-wider text-[var(--muted)]">
+                Open lobby
+              </h2>
+              <Link href="/play" className="text-[11px] text-[var(--accent)]">
+                Play →
+              </Link>
+            </div>
+            {openDuels.length === 0 ? (
+              <p className="mt-3 text-[11px] leading-relaxed text-[var(--muted)]">
+                Nobody is waiting.{" "}
+                <Link href="/play" className="text-[var(--accent)] underline">
+                  Create a challenge
+                </Link>{" "}
+                and it appears here.
+              </p>
+            ) : (
+              <ul className="mt-2 divide-y divide-[var(--line)]">
+                {openDuels.slice(0, 4).map((duel) => (
+                  <li key={duel.code} className="flex items-center justify-between gap-2 py-2">
+                    <span className="min-w-0">
+                      <span className="block truncate text-[12px]">@{duel.hostHandle}</span>
+                      <span className="block text-[10px] text-[var(--muted)]">
+                        {duel.timeControl === "correspondence"
+                          ? "Correspondence"
+                          : duel.timeControl.replace("+", " + ")}{" "}
+                        · plays {duel.hostColor === "white" ? "black" : "white"}
+                      </span>
+                    </span>
+                    {duel.hostHandle === viewer?.handle ? (
+                      <Link
+                        href={`/duel/${duel.code}`}
+                        className="shrink-0 rounded-sm border border-[var(--line)] px-2 py-1 text-[10px] text-[var(--muted)]"
+                      >
+                        Your link
+                      </Link>
+                    ) : (
+                      <Link
+                        href={viewer ? `/duel/${duel.code}` : "/login"}
+                        className="shrink-0 rounded-sm bg-[var(--accent)] px-2.5 py-1 text-[10px] font-semibold text-white"
+                      >
+                        Accept
+                      </Link>
+                    )}
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+
+          {/* Three latest community games, the way Lichess shows its blog. */}
+          <div className="rounded-xl border border-[var(--line)] bg-[var(--panel)] p-4">
+            <div className="mb-2 flex items-baseline justify-between">
+              <h2 className="text-[11px] font-medium uppercase tracking-wider text-[var(--muted)]">
+                From the community
+              </h2>
+              <Link href="/community" className="text-[11px] text-[var(--accent)]">
+                All →
+              </Link>
+            </div>
+            <ul className="mt-2 flex flex-col gap-2">
+              {[...studies].reverse().slice(0, 3).map((study) => (
+                <li key={study.id}>
+                  <Link
+                    href={`/community/${study.id}`}
+                    className="group flex items-center gap-3 rounded-md border border-[var(--line)] p-2 transition hover:border-[var(--accent)]"
+                  >
+                    <MiniBoard fen={study.finalFen} size={44} />
+                    <span className="min-w-0 flex-1">
+                      <span className="block truncate text-[12px] font-medium group-hover:text-[var(--accent)]">
+                        {study.title}
+                      </span>
+                      <span className="block truncate text-[10px] text-[var(--muted)]">
+                        {study.author || "Community"} · {study.plies} plies
+                      </span>
+                    </span>
+                  </Link>
+                </li>
+              ))}
+            </ul>
+          </div>
+        </div>
+        <p className="mt-4 text-[11px] text-[var(--muted)]">
+          {members} players · {gameCount} games saved · clocks and challenges are server-side
+        </p>
+      </section>
     </main>
   );
 }

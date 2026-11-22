@@ -147,6 +147,36 @@ model Profile {
 
 /// A curated game or line that ships with the app — the "community" library.
 /// Read-only content plus a comment thread; no accounts, no server.
+
+/// A challenge between two accounts: public (appears in the lobby) or private
+/// (a link you send a friend). Clocks are server-side and resume across reloads.
+model Duel {
+  id          String    @id @default(cuid())
+  code        String    @unique
+  visibility  String    @default("public") // "public" | "private"
+  status      String    @default("open") // open | playing | finished | cancelled
+  hostId      String
+  host        User      @relation("DuelHost", fields: [hostId], references: [id], onDelete: Cascade)
+  hostColor   String    // "white" | "black"
+  guestId     String?
+  guest       User?     @relation("DuelGuest", fields: [guestId], references: [id], onDelete: SetNull)
+  timeControl String    // "1+0", "5+3", "correspondence"
+  clocked     Boolean   @default(true)
+  whiteMs     Int       @default(0)
+  blackMs     Int       @default(0)
+  turn        String    @default("w")
+  pgn         String    @default("")
+  fen         String
+  lastMoveAt  DateTime?
+  winner      String?   // "white" | "black" | "draw"
+  resultText  String    @default("")
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  @@index([status, visibility, createdAt])
+  @@index([guestId])
+}
+
 model Study {
   id        String    @id @default(cuid())
   title     String
@@ -214,6 +244,8 @@ model User {
   comments     Comment[]
   sessions     Session[]
   emailTokens  EmailToken[]
+  hostedDuels  Duel[]     @relation("DuelHost")
+  joinedDuels  Duel[]     @relation("DuelGuest")
 }
 
 model Session {

@@ -27,7 +27,7 @@ export type StartConfig = {
   fen: string | null;
 };
 
-const QUICK = ["1+0", "3+0", "3+2", "5+3", "10+0", "unlimited"] as const;
+const QUICK = ["1+0", "2+1", "3+0", "3+2", "5+0", "5+3", "10+0", "10+5", "15+10", "30+0", "30+20"] as const;
 const GROUPS = ["Bullet", "Blitz", "Rapid", "Classical"] as const;
 
 export default function GameSetup({
@@ -158,7 +158,7 @@ export default function GameSetup({
         <h2 className="mb-2 text-[11px] font-medium uppercase tracking-wider text-[var(--muted)]">
           Quick pairing · one click starts
         </h2>
-        <div className="grid grid-cols-3 gap-2 sm:grid-cols-6">
+        <div className="grid grid-cols-3 gap-2">
           {QUICK.map((id) => {
             const tc = timeControlById(id);
             return (
@@ -167,10 +167,10 @@ export default function GameSetup({
                 onClick={() =>
                   start({ tcId: id, colour: "random", mode: "standard", fen: null })
                 }
-                className="flex flex-col items-center gap-0.5 rounded-lg border border-[var(--line)] bg-[var(--panel)] px-2 py-3 transition hover:border-[var(--accent)] hover:bg-[var(--panel-2)]"
+                className="flex flex-col items-center gap-0.5 rounded-sm border border-[var(--line)] bg-[var(--panel)] px-2 py-3 transition hover:border-[var(--accent)] hover:bg-[var(--panel-2)]"
               >
-                <span className="font-mono text-base">
-                  {tc.initial === null ? "∞" : tc.label.replace(/ /g, "")}
+                <span className="font-mono text-[17px] leading-tight">
+                  {tc.label.replace(/ /g, "")}
                 </span>
                 <span className="text-[10px] uppercase tracking-wide text-[var(--muted)]">
                   {tc.category}
@@ -178,6 +178,15 @@ export default function GameSetup({
               </button>
             );
           })}
+          <button
+            onClick={() =>
+              document.getElementById("time-controls")?.scrollIntoView({ block: "center" })
+            }
+            className="flex flex-col items-center gap-0.5 rounded-sm border border-[var(--line)] bg-[var(--panel)] px-2 py-3 transition hover:border-[var(--accent)] hover:bg-[var(--panel-2)]"
+          >
+            <span className="font-mono text-[17px] leading-tight">—</span>
+            <span className="text-[10px] uppercase tracking-wide text-[var(--muted)]">Custom</span>
+          </button>
         </div>
         <p className="mt-2 text-[11px] text-[var(--muted)]">
           Starts instantly against {who} with a random colour. Pick another
@@ -308,7 +317,7 @@ export default function GameSetup({
         </div>
 
         <div className="flex flex-col gap-5 px-5 py-4">
-          <Row label="Time">
+          <Row label="Time" id="time-controls">
             <div className="flex flex-col gap-2">
               {GROUPS.map((group) => (
                 <div key={group} className="flex flex-wrap items-center gap-1.5">
@@ -428,9 +437,17 @@ export default function GameSetup({
   );
 }
 
-function Row({ label, children }: { label: string; children: React.ReactNode }) {
+function Row({
+  label,
+  id,
+  children,
+}: {
+  label: string;
+  id?: string;
+  children: React.ReactNode;
+}) {
   return (
-    <div className="grid gap-2 sm:grid-cols-[64px_minmax(0,1fr)] sm:items-start">
+    <div id={id} className="grid gap-2 sm:grid-cols-[64px_minmax(0,1fr)] sm:items-start">
       <span className="pt-1.5 text-[11px] font-medium uppercase tracking-wider text-[var(--muted)]">
         {label}
       </span>

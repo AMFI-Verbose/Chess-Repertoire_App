@@ -42,7 +42,8 @@ export default function AppNav({
   const router = useRouter();
   const [open, setOpen] = useState(false);
 
-  // A route change always closes the sheet, including a tap on the current page.
+  // A route change closes the sheet; a tap closes it immediately too, so
+  // choosing the page you are already on never looks like a dead button.
   useEffect(() => setOpen(false), [pathname]);
 
   useEffect(() => {
@@ -86,7 +87,12 @@ export default function AppNav({
         {/* Wide screens: every link inline. */}
         <nav className="ml-auto hidden min-w-0 items-center gap-0.5 text-sm lg:flex">
           {LINKS.map((link) => (
-            <Link key={link.href} href={link.href} className={linkClass(link.href, true)}>
+            <Link
+              key={link.href}
+              href={link.href}
+              onClick={() => setOpen(false)}
+              className={linkClass(link.href, true)}
+            >
               <PendingAware>{link.label}</PendingAware>
             </Link>
           ))}
@@ -143,7 +149,12 @@ export default function AppNav({
         <nav className="border-t border-[var(--line)] bg-[var(--bg)] px-3 pb-3 pt-2 lg:hidden">
           <div className="grid grid-cols-3 gap-1.5">
             {LINKS.map((link) => (
-              <Link key={link.href} href={link.href} className={linkClass(link.href, false)}>
+              <Link
+                key={link.href}
+                href={link.href}
+                onClick={() => setOpen(false)}
+                className={linkClass(link.href, false)}
+              >
                 <PendingAware>{link.label}</PendingAware>
               </Link>
             ))}

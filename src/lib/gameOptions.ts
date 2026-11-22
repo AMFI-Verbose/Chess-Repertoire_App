@@ -52,6 +52,7 @@ export const TIME_CONTROLS: TimeControl[] = [
   { id: "10+5", label: "10 + 5", initial: 600, increment: 5, category: "Rapid" },
   { id: "15+10", label: "15 + 10", initial: 900, increment: 10, category: "Rapid" },
   { id: "30+0", label: "30 + 0", initial: 1800, increment: 0, category: "Classical" },
+  { id: "30+20", label: "30 + 20", initial: 1800, increment: 20, category: "Classical" },
   { id: "unlimited", label: "No clock", initial: null, increment: 0, category: "Untimed" },
 ];
 
