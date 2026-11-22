@@ -30,6 +30,29 @@ const seeds = [
 ];
 
 async function main() {
+  // A fresh install still needs an arena on the home page, otherwise the
+  // "Open tournaments" card has nothing real to show.
+  if ((await prisma.tournament.count()) === 0) {
+    const now = Date.now();
+    await prisma.tournament.createMany({
+      data: [
+        {
+          name: "Sunday Blitz Arena",
+          timeControl: "3+2",
+          startsAt: new Date(now - 20 * 60_000),
+          endsAt: new Date(now + 40 * 60_000),
+        },
+        {
+          name: "Daily Rapid Arena",
+          timeControl: "10+0",
+          startsAt: new Date(now + 2 * 3600_000),
+          endsAt: new Date(now + 3 * 3600_000),
+        },
+      ],
+    });
+    console.log("created: 2 arena tournaments");
+  }
+
   for (const seed of seeds) {
     const already = await prisma.repertoire.findFirst({
       where: { name: seed.name },

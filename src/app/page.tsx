@@ -3,6 +3,7 @@ import { listStudies } from "@/app/actions";
 import MiniBoard from "@/components/MiniBoard";
 import { getViewer } from "@/lib/auth";
 import { listOpenDuels } from "@/lib/duels";
+import { listOpenTournaments } from "@/lib/tournaments";
 import { prisma } from "@/lib/prisma";
 import { createRepertoire } from "./actions";
 import { opponentLabel } from "@/lib/bots";
@@ -10,6 +11,14 @@ import { getTrainOverview } from "@/app/train/actions";
 
 // Read from the database on every request — never serve a stale cached page.
 export const dynamic = "force-dynamic";
+
+function arenaGap(targetIso: string, now: number) {
+  const minutes = Math.round(Math.abs(new Date(targetIso).getTime() - now) / 60_000);
+  if (minutes < 60) return `${minutes} min`;
+  const hours = Math.floor(minutes / 60);
+  const rest = minutes % 60;
+  return rest ? `${hours}h ${rest}m` : `${hours}h`;
+}
 
 export default async function DashboardPage() {
   const viewer = await getViewer();
@@ -29,6 +38,8 @@ export default async function DashboardPage() {
     openDuels,
     dailyPuzzle,
     members,
+    tournaments,
+    donations,
   ] = await Promise.all([
       prisma.repertoire.findMany({
         orderBy: { updatedAt: "desc" },
@@ -67,6 +78,8 @@ export default async function DashboardPage() {
         select: { id: true, fen: true, title: true, rating: true, day: true },
       }),
       prisma.user.count(),
+      listOpenTournaments(4),
+      prisma.donation.aggregate({ _sum: { amountCents: true }, _count: true }),
     ]);
 
   let streak = 0;
@@ -82,6 +95,7 @@ export default async function DashboardPage() {
     { label: "Games played", value: gameCount },
   ];
   void studyCount;
+  const raised = Math.round((donations._sum.amountCents ?? 0) / 100);
 
   return (
     <main className="mx-auto max-w-5xl px-6 py-14">
@@ -397,6 +411,124 @@ export default async function DashboardPage() {
       </div>
 
       <section className="mt-12 border-t border-[var(--line)] pt-8">
+        <div className="mb-4 flex items-baseline justify-between">
+          <h2 className="text-[11px] font-medium uppercase tracking-wider text-[var(--muted)]">
+            The club
+          </h2>
+          <span className="text-[10.5px] text-[var(--muted)]">Tournaments, shop and support</span>
+        </div>
+
+        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+          {/* Donate — the same quiet card Lichess puts at the top left. */}
+          <Link
+            href="/support"
+            className="group flex items-start gap-4 rounded-xl border border-[var(--line)] bg-[var(--panel)] p-4 transition hover:border-[#c89b4a]"
+          >
+            <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-[#f3e7cf] text-2xl text-[#a9782b]">
+              ♥
+            </span>
+            <span className="min-w-0 flex-1">
+              <span className="block text-[15px] font-semibold text-[#8a5f1d]">Donate</span>
+              <span className="mt-0.5 block text-[11.5px] text-[var(--muted)]">
+                {raised > 0
+                  ? `Become a patron — $${raised} pledged by ${donations._count} so far`
+                  : "Be the first patron — every pledge pays for the boards"}
+              </span>
+              <span className="mt-2 block text-[11px] text-[#a9782b]">Keep the boards ad-free →</span>
+            </span>
+          </Link>
+
+          {/* Open tournaments — a real arena list, not a placeholder banner. */}
+          <div className="rounded-xl border border-[var(--line)] bg-[var(--panel)] p-4">
+            <div className="flex items-baseline justify-between">
+              <h3 className="text-[15px] font-semibold">Open tournaments</h3>
+              <Link href="/tournaments" className="text-[10.5px] text-[var(--muted)] underline">
+                More »
+              </Link>
+            </div>
+            {tournaments.length === 0 ? (
+              <p className="mt-3 text-[11.5px] leading-relaxed text-[var(--muted)]">
+                No arena scheduled.{" "}
+                <Link href="/tournaments" className="text-[var(--accent)] underline">
+                  Create one
+                </Link>
+                .
+              </p>
+            ) : (
+              <ul className="mt-2 divide-y divide-[var(--line)]">
+                {tournaments.slice(0, 3).map((tournament) => {
+                  const live = tournament.status === "live";
+                  return (
+                    <li key={tournament.id}>
+                      <Link
+                        href={`/tournaments/${tournament.id}`}
+                        className="block py-2 transition hover:bg-[var(--panel-2)]"
+                      >
+                        <span className="flex items-center justify-between gap-2">
+                          <span className="truncate text-[12px]">
+                            {live ? "● " : "○ "}
+                            {tournament.name}
+                          </span>
+                          <span className="shrink-0 text-[10px] text-[var(--muted)]">
+                            {tournament.timeControl.replace("+", "+")}
+                          </span>
+                        </span>
+                        <span className="mt-1 flex items-center gap-2 text-[10px] text-[var(--muted)]">
+                          <span className="h-1.5 flex-1 overflow-hidden rounded-full bg-[var(--panel-2)]">
+                            <span
+                              className="block h-full rounded-full bg-[linear-gradient(90deg,#d9c8a0,#b9a173)]"
+                              style={{
+                                width: `${Math.max(
+                                  6,
+                                  Math.min(
+                                    100,
+                                    live
+                                      ? ((Date.now() - new Date(tournament.startsAt).getTime()) /
+                                          Math.max(
+                                            1,
+                                            new Date(tournament.endsAt).getTime() -
+                                              new Date(tournament.startsAt).getTime(),
+                                          )) *
+                                          100
+                                      : 6,
+                                  ),
+                                )}%`,
+                              }}
+                            />
+                          </span>
+                          <span className="shrink-0">
+                            {live
+                              ? `${arenaGap(tournament.endsAt, Date.now())} left`
+                              : `in ${arenaGap(tournament.startsAt, Date.now())}`}{" "}
+                            · {tournament.players} players
+                          </span>
+                        </span>
+                      </Link>
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
+          </div>
+
+          {/* Swag Store — the four real products. */}
+          <Link
+            href="/store"
+            className="group flex items-start gap-4 rounded-xl border border-[var(--line)] bg-[var(--panel)] p-4 transition hover:border-[#c89b4a]"
+          >
+            <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-[#f3e7cf] text-2xl text-[#a9782b]">
+              ♜
+            </span>
+            <span className="min-w-0 flex-1">
+              <span className="block text-[15px] font-semibold text-[#8a5f1d]">Swag Store</span>
+              <span className="mt-0.5 block text-[11.5px] text-[var(--muted)]">
+                Play chess in style — tees, hoodies, mugs and totes
+              </span>
+              <span className="mt-2 block text-[11px] text-[#a9782b]">Browse the shop →</span>
+            </span>
+          </Link>
+        </div>
+
         <div className="grid gap-4 lg:grid-cols-[minmax(0,1.55fr)_minmax(0,1fr)_minmax(0,1.1fr)]">
           {/* Daily puzzle — the one board everyone gets today. */}
           <div className="rounded-xl border border-[var(--line)] bg-[var(--panel)] p-4">
