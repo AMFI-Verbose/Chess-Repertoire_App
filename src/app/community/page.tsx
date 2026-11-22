@@ -20,9 +20,10 @@ export default async function CommunityPage() {
         </p>
         <h1 className="text-3xl font-semibold tracking-tight">Community</h1>
         <p className="mt-2 max-w-2xl text-sm leading-relaxed text-[var(--muted)]">
-          Annotated games from the built-in library and from players like you.
-          Step through them move by move, discuss specific positions, and copy
-          any game into your own repertoire with one click.
+          Annotated classics, real games pulled from Lichess tournaments every
+          morning, and games published by players like you. Step through them
+          move by move, pin a note to a position, and copy any game into your
+          own repertoire with one click.
         </p>
         <div className="mt-4 flex flex-wrap items-center gap-2">
           <Link

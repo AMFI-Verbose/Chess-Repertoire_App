@@ -19,6 +19,7 @@ import {
 } from "@/lib/chess";
 import type { NodeDTO } from "@/lib/types";
 import { START_RATING, updateRating } from "@/lib/elo";
+import { getViewer } from "@/lib/auth";
 
 type DbNode = {
   id: string;
@@ -918,6 +919,7 @@ export type StudySummary = {
   subtitle: string;
   eco: string;
   author: string;
+  source: string;
   plies: number;
   commentCount: number;
   createdAt: string;
@@ -937,6 +939,9 @@ export type StudyDetail = {
   subtitle: string;
   eco: string;
   author: string;
+  source: string;
+  sourceUrl: string;
+  ownerId: string | null;
   pgn: string;
   comments: CommentDTO[];
 };
@@ -962,6 +967,7 @@ export async function listStudies(): Promise<StudySummary[]> {
       subtitle: row.subtitle,
       eco: row.eco,
       author: row.author,
+      source: row.source,
       plies,
       commentCount: row._count.comments,
       createdAt: row.createdAt.toISOString(),
@@ -982,6 +988,9 @@ export async function getStudy(id: string): Promise<StudyDetail | null> {
     subtitle: row.subtitle,
     eco: row.eco,
     author: row.author,
+    source: row.source,
+    sourceUrl: row.sourceUrl,
+    ownerId: row.userId ?? null,
     pgn: row.pgn,
     comments: row.comments.map((comment) => ({
       id: comment.id,
@@ -995,14 +1004,16 @@ export async function getStudy(id: string): Promise<StudyDetail | null> {
 
 export async function addComment(input: {
   studyId: string;
-  author: string;
   body: string;
   ply?: number;
 }): Promise<CommentDTO | null> {
+  const viewer = await getViewer();
+  if (!viewer) return null;
+
   const body = input.body.trim().slice(0, 600);
   if (body.length === 0) return null;
 
-  const author = (input.author.trim() || "You").slice(0, 40);
+  const author = viewer.handle;
   const study = await prisma.study.findUnique({
     where: { id: input.studyId },
     select: { id: true },
@@ -1011,7 +1022,7 @@ export async function addComment(input: {
 
   const ply = Math.max(0, Math.floor(input.ply ?? 0));
   const comment = await prisma.comment.create({
-    data: { studyId: input.studyId, author, body, ply },
+    data: { studyId: input.studyId, author, body, ply, userId: viewer.id },
   });
 
   revalidatePath(`/community/${input.studyId}`);
@@ -1035,6 +1046,9 @@ export async function publishGameAsStudy(input: {
   subtitle?: string;
   author?: string;
 }): Promise<{ studyId: string } | null> {
+  const viewer = await getViewer();
+  if (!viewer) return null;
+
   const game = await prisma.game.findUnique({ where: { id: input.gameId } });
   if (!game || !game.pgn.trim()) return null;
 
@@ -1057,10 +1071,16 @@ export async function publishGameAsStudy(input: {
     `${game.resultText || `${game.result} as ${game.playerColor}`}${
       game.timeControl && game.timeControl !== "unlimited" ? ` · ${game.timeControl}` : ""
     }`;
-  const author = (input.author ?? "").trim().slice(0, 40) || "You";
-
   const study = await prisma.study.create({
-    data: { title, subtitle, pgn: game.pgn, author, eco: "" },
+    data: {
+      title,
+      subtitle,
+      pgn: game.pgn,
+      eco: "",
+      author: viewer.handle,
+      userId: viewer.id,
+      source: "local",
+    },
   });
 
   revalidatePath("/community");
@@ -1069,11 +1089,17 @@ export async function publishGameAsStudy(input: {
 
 /** Take your own study down again. The seeded library stays put. */
 export async function deleteStudy(input: { studyId: string }): Promise<boolean> {
+  const viewer = await getViewer();
+  if (!viewer) return false;
+
   const study = await prisma.study.findUnique({
     where: { id: input.studyId },
-    select: { id: true, author: true },
+    select: { id: true, author: true, userId: true },
   });
-  if (!study || study.author === "Community") return false;
+  if (!study) return false;
+  // Only the account that published it, and never the seeded or imported
+  // library: those belong to everybody.
+  if (study.userId !== viewer.id) return false;
 
   await prisma.study.delete({ where: { id: study.id } });
   revalidatePath("/community");

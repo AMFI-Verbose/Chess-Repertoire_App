@@ -153,8 +153,15 @@ model Study {
   subtitle  String    @default("")
   pgn       String
   eco       String    @default("")
-  /// Who published it. "Community" for the seeded library.
+  /// Who published it: "Community" (seeded), "Lichess" (imported), or a handle.
   author    String    @default("Community")
+  /// "local" (a game you published), "seed", or "lichess".
+  source    String    @default("local")
+  sourceUrl String    @default("")
+  /// Lichess game id, so the daily import never inserts the same game twice.
+  externalId String?  @unique
+  userId    String?
+  user      User?     @relation(fields: [userId], references: [id], onDelete: SetNull)
   createdAt DateTime  @default(now())
   comments  Comment[]
 }
@@ -166,6 +173,8 @@ model Comment {
   body      String
   /// Half-move this note is attached to. 0 = about the game, not a position.
   ply       Int      @default(0)
+  userId    String?
+  user      User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
   createdAt DateTime @default(now())
   study     Study    @relation(fields: [studyId], references: [id], onDelete: Cascade)
 
@@ -187,4 +196,28 @@ model Review {
 
   // Every session asks "what is due", so the scheduler column is indexed.
   @@index([dueAt])
+}
+
+/// A real account. The community is readable without one, but publishing a
+/// study and writing a note both require signing in.
+model User {
+  id           String    @id @default(cuid())
+  email        String    @unique
+  /// Lowercase, unique, shown next to every study and note this user writes.
+  handle       String    @unique
+  passwordHash String
+  createdAt    DateTime  @default(now())
+  studies      Study[]
+  comments     Comment[]
+  sessions     Session[]
+}
+
+model Session {
+  id        String   @id
+  userId    String
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
 }

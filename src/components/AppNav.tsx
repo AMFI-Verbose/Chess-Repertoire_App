@@ -1,7 +1,9 @@
 "use client";
 
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
+
+import { signOutAction } from "@/app/auth/actions";
 
 const LINKS = [
   { href: "/", label: "Repertoires" },
@@ -14,8 +16,13 @@ const LINKS = [
   { href: "/community", label: "Community" },
 ];
 
-export default function AppNav() {
+export default function AppNav({
+  user,
+}: {
+  user: { handle: string } | null;
+}) {
   const pathname = usePathname();
+  const router = useRouter();
 
   return (
     <header className="sticky top-0 z-30 border-b border-[var(--line)] bg-[color-mix(in_srgb,var(--bg)_88%,transparent)] backdrop-blur">
@@ -51,6 +58,34 @@ export default function AppNav() {
               </Link>
             );
           })}
+
+          {user ? (
+            <div className="ml-2 flex items-center gap-1 border-l border-[var(--line)] pl-2">
+              <Link
+                href="/community"
+                className="rounded-md px-2 py-1.5 text-xs font-medium text-[var(--accent)]"
+                title={user.handle}
+              >
+                @{user.handle}
+              </Link>
+              <button
+                onClick={async () => {
+                  await signOutAction();
+                  router.refresh();
+                }}
+                className="rounded-md px-2 py-1.5 text-xs text-[var(--muted)] transition hover:text-[var(--text)]"
+              >
+                Sign out
+              </button>
+            </div>
+          ) : (
+            <Link
+              href="/login"
+              className="ml-2 rounded-md border border-[var(--line)] px-2.5 py-1.5 text-xs text-[var(--muted)] transition hover:border-[var(--accent)] hover:text-[var(--accent)]"
+            >
+              Sign in
+            </Link>
+          )}
         </div>
       </nav>
     </header>

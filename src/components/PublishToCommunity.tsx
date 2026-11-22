@@ -13,16 +13,17 @@ export default function PublishToCommunity({
   gameId,
   defaultTitle,
   defaultSubtitle,
+  handle,
 }: {
   gameId: string;
   defaultTitle: string;
   defaultSubtitle: string;
+  handle: string | null;
 }) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [title, setTitle] = useState("");
   const [subtitle, setSubtitle] = useState("");
-  const [author, setAuthor] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -31,7 +32,7 @@ export default function PublishToCommunity({
     setBusy(true);
     setError(null);
     try {
-      const created = await publishGameAsStudy({ gameId, title, subtitle, author });
+      const created = await publishGameAsStudy({ gameId, title, subtitle });
       if (!created) {
         setError("This game has no moves to publish.");
         return;
@@ -42,6 +43,17 @@ export default function PublishToCommunity({
     } finally {
       setBusy(false);
     }
+  }
+
+  if (!handle) {
+    return (
+      <a
+        href="/login"
+        className="block rounded-lg border border-[var(--line)] px-3 py-2 text-center text-[11px] text-[var(--muted)] transition hover:border-[var(--accent)] hover:text-[var(--accent)]"
+      >
+        Sign in to publish to Community
+      </a>
+    );
   }
 
   if (!open) {
@@ -78,12 +90,9 @@ export default function PublishToCommunity({
         placeholder={defaultSubtitle}
         className="mb-2 w-full rounded-md border border-[var(--line)] bg-transparent px-2.5 py-1.5 text-[11px] outline-none focus:border-[var(--accent)]"
       />
-      <input
-        value={author}
-        onChange={(event) => setAuthor(event.target.value)}
-        placeholder="Your name (default: You)"
-        className="mb-2 w-full rounded-md border border-[var(--line)] bg-transparent px-2.5 py-1.5 text-[11px] outline-none focus:border-[var(--accent)]"
-      />
+      <p className="mb-2 text-[10px] text-[var(--muted)]">
+        Published as <span className="text-[var(--accent)]">@{handle}</span>
+      </p>
       {error && <p className="mb-2 text-[11px] text-red-400">{error}</p>}
       <button
         onClick={publish}

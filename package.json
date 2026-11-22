@@ -17,7 +17,8 @@
     "db:reset": "prisma migrate reset --force && npm run db:seed && npm run db:openings && npm run db:content",
     "db:content": "node scripts/seed-community.mjs",
     "db:puzzles": "node scripts/import-lichess-puzzles.mjs",
-    "check:lessons": "tsx scripts/check-lessons.mts"
+    "check:lessons": "tsx scripts/check-lessons.mts",
+    "lichess:import": "node scripts/import-lichess.mjs --count=10"
   },
   "dependencies": {
     "@prisma/client": "^6.19.3",

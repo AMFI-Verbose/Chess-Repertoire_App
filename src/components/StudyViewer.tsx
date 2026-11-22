@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { Chess } from "chess.js";
 import { Chessboard } from "react-chessboard";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 
 import {
@@ -17,10 +18,15 @@ import { play } from "@/lib/sound";
 
 type Move = { san: string; uci: string; after: string };
 
-export default function StudyViewer({ study }: { study: StudyDetail }) {
+export default function StudyViewer({
+  study,
+  viewer,
+}: {
+  study: StudyDetail;
+  viewer: { id: string; handle: string } | null;
+}) {
   const router = useRouter();
   const [at, setAt] = useState(0);
-  const [author, setAuthor] = useState("");
   const [body, setBody] = useState("");
   const [posting, setPosting] = useState(false);
   const [importing, setImporting] = useState(false);
@@ -90,7 +96,6 @@ export default function StudyViewer({ study }: { study: StudyDetail }) {
     try {
       await addComment({
         studyId: study.id,
-        author,
         body,
         // Anchor the note to the position on screen, so the thread reads as
         // annotations rather than floating opinions.
@@ -256,8 +261,23 @@ export default function StudyViewer({ study }: { study: StudyDetail }) {
           <p className="mt-1.5 text-xs leading-relaxed text-[var(--muted)]">
             {study.subtitle}
           </p>
-          <p className="mt-2 text-[11px] text-[var(--muted)]">
-            Published by <span className="text-[var(--text)]">{study.author || "Community"}</span>
+          <p className="mt-2 flex flex-wrap items-center gap-x-1.5 text-[11px] text-[var(--muted)]">
+            <span>
+              Published by{" "}
+              <span className="text-[var(--text)]">
+                {study.source === "local" ? `@${study.author}` : study.author || "Community"}
+              </span>
+            </span>
+            {study.source === "lichess" && study.sourceUrl && (
+              <a
+                href={study.sourceUrl}
+                target="_blank"
+                rel="noreferrer"
+                className="rounded border border-[var(--line)] px-1.5 py-0.5 text-[10px] text-[var(--accent)] transition hover:border-[var(--accent)]"
+              >
+                Lichess ↗
+              </a>
+            )}
           </p>
           <button
             onClick={practise}
@@ -269,7 +289,7 @@ export default function StudyViewer({ study }: { study: StudyDetail }) {
           <p className="mt-2 text-[11px] leading-relaxed text-[var(--muted)]">
             Copies the full game into a new repertoire you can branch and drill.
           </p>
-          {study.author !== "Community" &&
+          {viewer && study.ownerId === viewer.id &&
             (confirmDelete ? (
               <div className="mt-3 flex items-center gap-2 rounded-lg border border-[var(--line)] p-2">
                 <span className="flex-1 text-[11px] text-[var(--muted)]">
@@ -347,13 +367,11 @@ export default function StudyViewer({ study }: { study: StudyDetail }) {
             ))}
           </div>
 
+          {viewer ? (
           <form onSubmit={submitComment} className="mt-5 border-t border-[var(--line)] pt-4">
-            <input
-              value={author}
-              onChange={(event) => setAuthor(event.target.value)}
-              placeholder="Your name (optional)"
-              className="mb-2 w-full rounded-lg border border-[var(--line)] bg-transparent px-3 py-2 text-xs outline-none focus:border-[var(--accent)]"
-            />
+            <p className="mb-2 text-[11px] text-[var(--muted)]">
+              Posting as <span className="font-medium text-[var(--accent)]">@{viewer.handle}</span>
+            </p>
             {at > 0 && (
               <label className="mb-2 flex items-center gap-2 text-[11px] text-[var(--muted)]">
                 <input
@@ -380,6 +398,27 @@ export default function StudyViewer({ study }: { study: StudyDetail }) {
               {posting ? "Posting…" : "Post comment"}
             </button>
           </form>
+          ) : (
+            <div className="mt-5 border-t border-[var(--line)] pt-4">
+              <p className="text-xs leading-relaxed text-[var(--muted)]">
+                Reading is open to everyone. Sign in to leave a note on this game.
+              </p>
+              <div className="mt-3 flex gap-2">
+                <Link
+                  href="/login"
+                  className="flex-1 rounded-lg bg-[var(--accent)] px-3 py-2 text-center text-xs font-medium text-[#04231d] transition hover:brightness-110"
+                >
+                  Sign in
+                </Link>
+                <Link
+                  href="/signup"
+                  className="flex-1 rounded-lg border border-[var(--line)] px-3 py-2 text-center text-xs text-[var(--muted)] transition hover:text-[var(--text)]"
+                >
+                  Create account
+                </Link>
+              </div>
+            </div>
+          )}
         </div>
       </aside>
     </div>

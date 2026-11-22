@@ -6,6 +6,7 @@ import CopyPgn from "@/components/CopyPgn";
 import PublishToCommunity from "@/components/PublishToCommunity";
 import { START_FEN, normalizedFen, parsePgnGame, pgnHeader } from "@/lib/chess";
 import { opponentLabel } from "@/lib/bots";
+import { getViewer } from "@/lib/auth";
 
 export const dynamic = "force-dynamic";
 
@@ -20,7 +21,10 @@ export default async function GamePage({
   const { ply } = await searchParams;
   const initialPly = Math.max(0, Math.min(Number.parseInt(ply ?? "0", 10) || 0, 500));
 
-  const game = await prisma.game.findUnique({ where: { id } });
+  const [game, viewer] = await Promise.all([
+    prisma.game.findUnique({ where: { id } }),
+    getViewer(),
+  ]);
   if (!game) notFound();
 
   const parsed = parsePgnGame(game.pgn);
@@ -86,6 +90,7 @@ export default async function GamePage({
           <CopyPgn pgn={game.pgn} />
           <PublishToCommunity
             gameId={game.id}
+            handle={viewer?.handle ?? null}
             defaultTitle={
               game.kind === "import"
                 ? `${pgnHeader(game.pgn, "White") || "White"} vs ${pgnHeader(game.pgn, "Black") || "Black"}`
