@@ -70,9 +70,14 @@ export async function refreshLichessTournaments(force = false) {
     const payload = (await response.json()) as {
       created?: LichessTournament[];
       started?: LichessTournament[];
+      finished?: LichessTournament[];
     };
 
-    for (const event of [...(payload.started ?? []), ...(payload.created ?? [])]) {
+    for (const event of [
+      ...(payload.finished ?? []),
+      ...(payload.started ?? []),
+      ...(payload.created ?? []),
+    ]) {
       const limit = event.clock?.limit ?? 0;
       const increment = event.clock?.increment ?? 0;
       const minutes = Math.round((limit / 60) * 10) / 10;
@@ -211,6 +216,17 @@ export async function listRecentTournaments(take = 5) {
   const rows = await prisma.tournament.findMany({
     where: { source: "local" },
     orderBy: { startsAt: "desc" },
+    take,
+    include: { _count: { select: { entries: true } } },
+  });
+  return rows.map(summary);
+}
+
+/** External events that just ended, newest first. */
+export async function listFinishedTournaments(take = 8): Promise<TournamentSummary[]> {
+  const rows = await prisma.tournament.findMany({
+    where: { source: { not: "local" }, endsAt: { lte: new Date() } },
+    orderBy: { endsAt: "desc" },
     take,
     include: { _count: { select: { entries: true } } },
   });
