@@ -65,7 +65,14 @@ PHASES = [
         "Learn curriculum",
         "16 lessons in 5 chapters, XP and streak, a Pro shelf behind a real entitlement flag.",
         dt.datetime(2026, 11, 21, 19, 0),
-        dt.datetime(2026, 11, 27, 0, 0),
+        dt.datetime(2026, 11, 22, 0, 0),
+    ),
+    (
+        "05",
+        "Repertoire trainer",
+        "Your saved lines become flashcards: SM-2 intervals, recall stats, a due queue on the dashboard.",
+        dt.datetime(2026, 11, 22, 0, 0),
+        dt.datetime(2026, 11, 30, 0, 0),
     ),
 ]
 
@@ -267,7 +274,7 @@ def main() -> None:
 
     # ---- planned ------------------------------------------------------------
     dashed_rect(d, [MARGIN, y, W - MARGIN, y + plan_h], 16 * S, COL["line"])
-    d.text((MARGIN + 28 * S, y + 24 * S), "05  Commerce — the shelf people pay for", font=F_PHASE, fill=COL["accent"])
+    d.text((MARGIN + 28 * S, y + 24 * S), "06  Commerce — the shelf people pay for", font=F_PHASE, fill=COL["accent"])
     plan_text = (
         "Accounts and Stripe checkout sitting on the entitlement flag that already gates the Pro chapters (chess.learn.v2.pro). "
         "Everything above this line is free to play; the paywall exists, only the billing is missing."

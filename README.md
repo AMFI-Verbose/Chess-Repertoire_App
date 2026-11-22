@@ -196,6 +196,7 @@ on the machine actually has Pillow (Homebrew's Python ships without it).
 |---|
 | ![Setup](docs/screenshots/setup.png) | ![Home](docs/screenshots/home.png) |
 | ![Learn](docs/screenshots/learn-overview.png) | ![Lesson](docs/screenshots/learn-lesson.png) |
+| ![Train](docs/screenshots/train.png) | ![Train session](docs/screenshots/train-session.png) |
 
 ---
 
