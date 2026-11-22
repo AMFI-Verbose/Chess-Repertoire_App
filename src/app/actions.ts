@@ -917,14 +917,17 @@ export type StudySummary = {
   title: string;
   subtitle: string;
   eco: string;
+  author: string;
   plies: number;
   commentCount: number;
+  createdAt: string;
 };
 
 export type CommentDTO = {
   id: string;
   author: string;
   body: string;
+  ply: number;
   createdAt: string;
 };
 
@@ -933,6 +936,7 @@ export type StudyDetail = {
   title: string;
   subtitle: string;
   eco: string;
+  author: string;
   pgn: string;
   comments: CommentDTO[];
 };
@@ -957,8 +961,10 @@ export async function listStudies(): Promise<StudySummary[]> {
       title: row.title,
       subtitle: row.subtitle,
       eco: row.eco,
+      author: row.author,
       plies,
       commentCount: row._count.comments,
+      createdAt: row.createdAt.toISOString(),
     };
   });
 }
@@ -975,11 +981,13 @@ export async function getStudy(id: string): Promise<StudyDetail | null> {
     title: row.title,
     subtitle: row.subtitle,
     eco: row.eco,
+    author: row.author,
     pgn: row.pgn,
     comments: row.comments.map((comment) => ({
       id: comment.id,
       author: comment.author,
       body: comment.body,
+      ply: comment.ply,
       createdAt: comment.createdAt.toISOString(),
     })),
   };
@@ -989,6 +997,7 @@ export async function addComment(input: {
   studyId: string;
   author: string;
   body: string;
+  ply?: number;
 }): Promise<CommentDTO | null> {
   const body = input.body.trim().slice(0, 600);
   if (body.length === 0) return null;
@@ -1000,8 +1009,9 @@ export async function addComment(input: {
   });
   if (!study) return null;
 
+  const ply = Math.max(0, Math.floor(input.ply ?? 0));
   const comment = await prisma.comment.create({
-    data: { studyId: input.studyId, author, body },
+    data: { studyId: input.studyId, author, body, ply },
   });
 
   revalidatePath(`/community/${input.studyId}`);
@@ -1009,8 +1019,65 @@ export async function addComment(input: {
     id: comment.id,
     author: comment.author,
     body: comment.body,
+    ply: comment.ply,
     createdAt: comment.createdAt.toISOString(),
   };
+}
+
+/**
+ * Publish one of your own finished games as a community study. The game row
+ * stays untouched: the study is a copy of its PGN plus a title and author, so
+ * continuing to analyse the game later never rewrites the published version.
+ */
+export async function publishGameAsStudy(input: {
+  gameId: string;
+  title?: string;
+  subtitle?: string;
+  author?: string;
+}): Promise<{ studyId: string } | null> {
+  const game = await prisma.game.findUnique({ where: { id: input.gameId } });
+  if (!game || !game.pgn.trim()) return null;
+
+  let plies = game.plies;
+  try {
+    const parsed = new Chess();
+    parsed.loadPgn(game.pgn);
+    plies = parsed.history().length;
+  } catch {
+    // Keep the stored ply count when the PGN cannot be replayed.
+  }
+
+  const outcome =
+    game.result === "win" ? "won" : game.result === "loss" ? "lost" : "drew";
+  const title =
+    (input.title ?? "").trim().slice(0, 90) ||
+    `${game.playerColor === "white" ? "White" : "Black"} · ${plies} moves · ${outcome}`;
+  const subtitle =
+    (input.subtitle ?? "").trim().slice(0, 200) ||
+    `${game.resultText || `${game.result} as ${game.playerColor}`}${
+      game.timeControl && game.timeControl !== "unlimited" ? ` · ${game.timeControl}` : ""
+    }`;
+  const author = (input.author ?? "").trim().slice(0, 40) || "You";
+
+  const study = await prisma.study.create({
+    data: { title, subtitle, pgn: game.pgn, author, eco: "" },
+  });
+
+  revalidatePath("/community");
+  return { studyId: study.id };
+}
+
+/** Take your own study down again. The seeded library stays put. */
+export async function deleteStudy(input: { studyId: string }): Promise<boolean> {
+  const study = await prisma.study.findUnique({
+    where: { id: input.studyId },
+    select: { id: true, author: true },
+  });
+  if (!study || study.author === "Community") return false;
+
+  await prisma.study.delete({ where: { id: study.id } });
+  revalidatePath("/community");
+  return true;
 }
 
 /**

@@ -3,6 +3,7 @@ import { notFound } from "next/navigation";
 import { prisma } from "@/lib/prisma";
 import ReviewSequence, { type ReviewMove } from "@/components/ReviewSequence";
 import CopyPgn from "@/components/CopyPgn";
+import PublishToCommunity from "@/components/PublishToCommunity";
 import { START_FEN, normalizedFen, parsePgnGame, pgnHeader } from "@/lib/chess";
 import { opponentLabel } from "@/lib/bots";
 
@@ -83,6 +84,20 @@ export default async function GamePage({
             {game.result.toUpperCase()} · {game.playerColor}
           </div>
           <CopyPgn pgn={game.pgn} />
+          <PublishToCommunity
+            gameId={game.id}
+            defaultTitle={
+              game.kind === "import"
+                ? `${pgnHeader(game.pgn, "White") || "White"} vs ${pgnHeader(game.pgn, "Black") || "Black"}`
+                : `${game.playerColor === "white" ? "White" : "Black"} vs ${opponentLabel(
+                    game.botId,
+                    game.level,
+                  )}`
+            }
+            defaultSubtitle={`${game.resultText || game.result}${
+              game.timeControl === "unlimited" ? "" : ` · ${game.timeControl}`
+            }`}
+          />
           <details className="rounded-lg border border-[var(--line)] p-2">
             <summary className="cursor-pointer text-[11px] text-[var(--muted)]">
               Show PGN

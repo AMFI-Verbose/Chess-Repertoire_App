@@ -8,6 +8,7 @@ import { useRouter } from "next/navigation";
 import {
   addComment,
   addStudyToRepertoire,
+  deleteStudy,
   type StudyDetail,
 } from "@/app/actions";
 import { DARK_SQUARE, LIGHT_SQUARE, squaresOf, tint } from "@/lib/boardTheme";
@@ -23,6 +24,9 @@ export default function StudyViewer({ study }: { study: StudyDetail }) {
   const [body, setBody] = useState("");
   const [posting, setPosting] = useState(false);
   const [importing, setImporting] = useState(false);
+  const [anchor, setAnchor] = useState(true);
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const [deleting, setDeleting] = useState(false);
 
   const { moves, positions } = useMemo(() => {
     const game = new Chess();
@@ -84,11 +88,30 @@ export default function StudyViewer({ study }: { study: StudyDetail }) {
     if (body.trim().length === 0 || posting) return;
     setPosting(true);
     try {
-      await addComment({ studyId: study.id, author, body });
+      await addComment({
+        studyId: study.id,
+        author,
+        body,
+        // Anchor the note to the position on screen, so the thread reads as
+        // annotations rather than floating opinions.
+        ply: anchor ? at : 0,
+      });
       setBody("");
       router.refresh();
     } finally {
       setPosting(false);
+    }
+  }
+
+  async function unpublish() {
+    if (deleting) return;
+    setDeleting(true);
+    try {
+      const gone = await deleteStudy({ studyId: study.id });
+      if (gone) router.push("/community");
+      else setConfirmDelete(false);
+    } finally {
+      setDeleting(false);
     }
   }
 
@@ -101,6 +124,24 @@ export default function StudyViewer({ study }: { study: StudyDetail }) {
     } finally {
       setImporting(false);
     }
+  }
+
+  /** Which moves carry notes, so the scoresheet can show a dot on them. */
+  const notesByPly = useMemo(() => {
+    const counts = new Map<number, number>();
+    for (const comment of study.comments) {
+      if (comment.ply > 0) counts.set(comment.ply, (counts.get(comment.ply) ?? 0) + 1);
+    }
+    return counts;
+  }, [study.comments]);
+
+  /** "12. Nf3" for a half-move index, or null for the start position. */
+  function labelForPly(ply: number) {
+    if (ply <= 0) return null;
+    const move = moves[ply - 1];
+    const number = Math.floor((ply - 1) / 2) + 1;
+    const dots = ply % 2 === 1 ? "." : "…";
+    return `${number}${dots} ${move ? move.san : "?"}`;
   }
 
   const rows = useMemo(() => {
@@ -181,6 +222,9 @@ export default function StudyViewer({ study }: { study: StudyDetail }) {
                     }`}
                   >
                     {row.white?.san}
+                    {row.white && notesByPly.has(row.whitePly) && (
+                      <span className="ml-0.5 text-[var(--accent)]">•</span>
+                    )}
                   </button>
                   {row.black && (
                     <button
@@ -212,6 +256,9 @@ export default function StudyViewer({ study }: { study: StudyDetail }) {
           <p className="mt-1.5 text-xs leading-relaxed text-[var(--muted)]">
             {study.subtitle}
           </p>
+          <p className="mt-2 text-[11px] text-[var(--muted)]">
+            Published by <span className="text-[var(--text)]">{study.author || "Community"}</span>
+          </p>
           <button
             onClick={practise}
             disabled={importing}
@@ -222,6 +269,34 @@ export default function StudyViewer({ study }: { study: StudyDetail }) {
           <p className="mt-2 text-[11px] leading-relaxed text-[var(--muted)]">
             Copies the full game into a new repertoire you can branch and drill.
           </p>
+          {study.author !== "Community" &&
+            (confirmDelete ? (
+              <div className="mt-3 flex items-center gap-2 rounded-lg border border-[var(--line)] p-2">
+                <span className="flex-1 text-[11px] text-[var(--muted)]">
+                  Remove from the community?
+                </span>
+                <button
+                  onClick={unpublish}
+                  disabled={deleting}
+                  className="rounded-md bg-red-500/90 px-2 py-1 text-[11px] font-medium text-white transition hover:bg-red-500 disabled:opacity-60"
+                >
+                  {deleting ? "…" : "Delete"}
+                </button>
+                <button
+                  onClick={() => setConfirmDelete(false)}
+                  className="rounded-md border border-[var(--line)] px-2 py-1 text-[11px] text-[var(--muted)]"
+                >
+                  Keep
+                </button>
+              </div>
+            ) : (
+              <button
+                onClick={() => setConfirmDelete(true)}
+                className="mt-3 text-[11px] text-[var(--muted)] underline decoration-dotted transition hover:text-[var(--text)]"
+              >
+                Unpublish this study
+              </button>
+            ))}
         </div>
 
         <div className="rounded-xl border border-[var(--line)] bg-[var(--panel)] p-5">
@@ -239,16 +314,30 @@ export default function StudyViewer({ study }: { study: StudyDetail }) {
               </p>
             )}
             {study.comments.map((comment) => (
-              <article key={comment.id} className="flex gap-3">
+              <article
+                key={comment.id}
+                className={`flex gap-3 ${
+                  comment.ply === at && at > 0 ? "rounded-lg bg-[var(--panel-2)] p-2" : ""
+                }`}
+              >
                 <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-[var(--line)] bg-[#f0d9b5] text-xs font-semibold text-[#b58863]">
                   {comment.author.slice(0, 1).toUpperCase()}
                 </span>
                 <div className="min-w-0 flex-1">
-                  <div className="flex items-baseline gap-2">
+                  <div className="flex flex-wrap items-baseline gap-2">
                     <span className="text-xs font-medium">{comment.author}</span>
                     <span className="text-[10px] text-[var(--muted)]">
                       {new Date(comment.createdAt).toLocaleDateString()}
                     </span>
+                    {comment.ply > 0 && (
+                      <button
+                        onClick={() => goTo(comment.ply)}
+                        title="Jump to this position"
+                        className="rounded border border-[var(--line)] bg-[var(--panel-2)] px-1.5 py-0.5 font-mono text-[10px] text-[var(--accent)] transition hover:border-[var(--accent)]"
+                      >
+                        {labelForPly(comment.ply)}
+                      </button>
+                    )}
                   </div>
                   <p className="mt-1 text-xs leading-relaxed text-[var(--muted)]">
                     {comment.body}
@@ -265,6 +354,17 @@ export default function StudyViewer({ study }: { study: StudyDetail }) {
               placeholder="Your name (optional)"
               className="mb-2 w-full rounded-lg border border-[var(--line)] bg-transparent px-3 py-2 text-xs outline-none focus:border-[var(--accent)]"
             />
+            {at > 0 && (
+              <label className="mb-2 flex items-center gap-2 text-[11px] text-[var(--muted)]">
+                <input
+                  type="checkbox"
+                  checked={anchor}
+                  onChange={(event) => setAnchor(event.target.checked)}
+                  className="h-3 w-3 accent-[var(--accent)]"
+                />
+                Attach to <span className="font-mono text-[var(--accent)]">{labelForPly(at)}</span>
+              </label>
+            )}
             <textarea
               value={body}
               onChange={(event) => setBody(event.target.value)}

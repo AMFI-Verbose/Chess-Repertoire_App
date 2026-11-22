@@ -15,6 +15,8 @@ import { DARK_SQUARE, LIGHT_SQUARE } from "@/lib/boardTheme";
 import { hintStyles } from "@/lib/boardHints";
 import { expectedScore } from "@/lib/elo";
 import { play } from "@/lib/sound";
+import { isPromotion } from "@/lib/chess";
+import PromotionPicker, { type PromotionPiece } from "@/components/PromotionPicker";
 
 type Status = "solving" | "solved" | "failed" | "revealed";
 
@@ -58,6 +60,7 @@ export default function PuzzleTrainer({
   const [loading, setLoading] = useState(false);
   const [delta, setDelta] = useState<number | null>(null);
   const [selected, setSelected] = useState<string | null>(null);
+  const [promo, setPromo] = useState<{ from: string; to: string } | null>(null);
 
   // A mutable board that mirrors whatever is on screen.
   const board = useRef(new Chess(initial.fen));
@@ -128,7 +131,11 @@ export default function PuzzleTrainer({
   }, [initialTheme]);
 
   /** Validate and commit one attempt. Returns false for anything illegal. */
-  function tryMove(sourceSquare: string, targetSquare: string): boolean {
+  function tryMove(
+    sourceSquare: string,
+    targetSquare: string,
+    promotion?: PromotionPiece,
+  ): boolean {
     if (status !== "solving" || loading) return false;
     if (board.current.turn() !== (solverPlays === "white" ? "w" : "b")) return false;
 
@@ -147,14 +154,23 @@ export default function PuzzleTrainer({
     }
     if (!legal) return false;
 
+    // A promoting pawn waits for the piece: a rook or knight promotion is a
+    // different answer from a queen, and the sheet knows which it wants.
+    if (!promotion && isPromotion(board.current.fen(), sourceSquare, targetSquare)) {
+      setPromo({ from: sourceSquare, to: targetSquare });
+      return false;
+    }
+
     // Never index past the end of the line: a drop can land during the
     // opponent's reply window, after the solution is already exhausted.
     const expectedMove = solution[step];
     if (!expectedMove) return false;
 
     const expected = expectedMove.slice(0, 4);
+    const piece = promotion ?? "q";
+    const expectedPiece = expectedMove.length > 4 ? expectedMove[4] : "q";
 
-    if (legal !== expected) {
+    if (legal !== expected || piece !== expectedPiece) {
       // First wrong move ends the attempt, exactly like Lichess.
       setShaking(true);
       window.setTimeout(() => setShaking(false), 420);
@@ -164,7 +180,7 @@ export default function PuzzleTrainer({
       return false;
     }
 
-    apply(uci);
+    apply(`${uci}${promotion ?? ""}`);
     const nextStep = step + 1;
     setStep(nextStep);
 
@@ -324,12 +340,23 @@ export default function PuzzleTrainer({
           className={`relative w-full max-w-[600px] ${shaking ? "animate-shake" : ""}`}
         >
           <div
-            className={`overflow-hidden rounded-xl border shadow-[0_10px_40px_-20px_rgba(0,0,0,0.9)] transition-colors ${
+            className={`relative overflow-hidden rounded-xl border shadow-[0_10px_40px_-20px_rgba(0,0,0,0.9)] transition-colors ${
               status === "solved"
                 ? "border-[var(--accent)]"
                 : "border-[var(--line)]"
             }`}
           >
+            {promo && (
+              <PromotionPicker
+                side={position.split(" ")[1] === "b" ? "black" : "white"}
+                onPick={(piece: PromotionPiece) => {
+                  setPromo(null);
+                  tryMove(promo.from, promo.to, piece);
+                }}
+                onCancel={() => setPromo(null)}
+                compact
+              />
+            )}
             <Chessboard
               options={{
                 id: "puzzle-board",

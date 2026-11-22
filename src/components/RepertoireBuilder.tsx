@@ -10,6 +10,7 @@ import {
   moveNumberOf,
   normalizedFen,
   tryMove,
+  isPromotion,
   turnOf,
 } from "@/lib/chess";
 import type { NodeDTO } from "@/lib/types";
@@ -25,6 +26,7 @@ import {
 } from "@/app/actions";
 
 import ModeTabs from "@/components/ModeTabs";
+import PromotionPicker, { type PromotionPiece } from "@/components/PromotionPicker";
 import { DARK_SQUARE, LIGHT_SQUARE } from "@/lib/boardTheme";
 
 type Pending = {
@@ -55,6 +57,7 @@ export default function RepertoireBuilder({
   const root = nodes.find((n) => n.ply === 0) ?? initialNodes[0];
   const [currentId, setCurrentId] = useState<string>(root?.id ?? "");
   const [selected, setSelected] = useState<string | null>(null);
+  const [promo, setPromo] = useState<{ from: string; to: string } | null>(null);
   const [pending, setPending] = useState<Pending | null>(null);
   const [orientation, setOrientation] = useState<"white" | "black">(side);
   const [confirmDelete, setConfirmDelete] = useState(false);
@@ -234,6 +237,7 @@ export default function RepertoireBuilder({
     setCurrentId(id);
     setSelected(null);
     setPending(null);
+    setPromo(null);
     setConfirmDelete(false);
   }
 
@@ -242,8 +246,13 @@ export default function RepertoireBuilder({
    * Returns true when the board should keep the move (it already exists in the
    * repertoire), false when the piece should snap back.
    */
-  function attempt(from: string, to: string): boolean {
-    const result = tryMove(current!.fen, from, to);
+  function attempt(from: string, to: string, promotion?: string): boolean {
+    // A pawn on the last rank must choose its piece; the board pauses here.
+    if (!promotion && isPromotion(current!.fen, from, to)) {
+      setPromo({ from, to });
+      return false;
+    }
+    const result = tryMove(current!.fen, from, to, promotion ?? "q");
     if (!result) {
       play("error"); // illegal move — the piece snaps back
       return false;
@@ -431,7 +440,18 @@ export default function RepertoireBuilder({
       <main className="mx-auto grid max-w-6xl gap-8 px-6 py-8 lg:grid-cols-[minmax(0,1fr)_380px]">
         {/* ---------- Board column ---------- */}
         <section className="flex flex-col items-center gap-4">
-          <div className="board-glow w-full max-w-[540px] overflow-hidden rounded-xl border border-[var(--line)] shadow-2xl shadow-black/40">
+          <div className="board-glow relative w-full max-w-[540px] overflow-hidden rounded-xl border border-[var(--line)] shadow-2xl shadow-black/40">
+            {promo && (
+              <PromotionPicker
+                side={(current!.fen.split(" ")[1] === "b" ? "black" : "white")}
+                onPick={(piece: PromotionPiece) => {
+                  const target = promo;
+                  setPromo(null);
+                  if (target) attempt(target.from, target.to, piece);
+                }}
+                onCancel={() => setPromo(null)}
+              />
+            )}
             <Chessboard
               options={{
                 id: "repertoire-board",

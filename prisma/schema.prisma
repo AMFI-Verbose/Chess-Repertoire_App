@@ -153,6 +153,8 @@ model Study {
   subtitle  String    @default("")
   pgn       String
   eco       String    @default("")
+  /// Who published it. "Community" for the seeded library.
+  author    String    @default("Community")
   createdAt DateTime  @default(now())
   comments  Comment[]
 }
@@ -162,6 +164,8 @@ model Comment {
   studyId   String
   author    String
   body      String
+  /// Half-move this note is attached to. 0 = about the game, not a position.
+  ply       Int      @default(0)
   createdAt DateTime @default(now())
   study     Study    @relation(fields: [studyId], references: [id], onDelete: Cascade)
 
