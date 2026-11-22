@@ -229,7 +229,7 @@ export default function StudyViewer({
                     onClick={() => goTo(row.whitePly)}
                     className={`rounded px-1.5 py-0.5 transition ${
                       at === row.whitePly
-                        ? "bg-[var(--accent)] text-[#04231d]"
+                        ? "bg-[var(--accent)] text-white"
                         : "hover:bg-[var(--panel-2)]"
                     }`}
                   >
@@ -243,7 +243,7 @@ export default function StudyViewer({
                       onClick={() => goTo(row.blackPly)}
                       className={`rounded px-1.5 py-0.5 transition ${
                         at === row.blackPly
-                          ? "bg-[var(--accent)] text-[#04231d]"
+                          ? "bg-[var(--accent)] text-white"
                           : "hover:bg-[var(--panel-2)]"
                       }`}
                     >
@@ -289,7 +289,7 @@ export default function StudyViewer({
           <button
             onClick={practise}
             disabled={importing}
-            className="mt-4 w-full rounded-lg border border-[var(--accent)] px-4 py-2 text-sm font-medium text-[var(--accent)] transition hover:bg-[var(--accent)] hover:text-[#04231d] disabled:opacity-60"
+            className="mt-4 w-full rounded-lg border border-[var(--accent)] px-4 py-2 text-sm font-medium text-[var(--accent)] transition hover:bg-[var(--accent)] hover:text-white disabled:opacity-60"
           >
             {importing ? "Importing…" : "Practise this game →"}
           </button>
@@ -404,12 +404,12 @@ export default function StudyViewer({
             <button
               type="submit"
               disabled={posting || body.trim().length === 0}
-              className="mt-2 w-full rounded-lg bg-[var(--accent)] px-4 py-2 text-xs font-medium text-[#04231d] transition hover:brightness-110 disabled:opacity-50"
+              className="mt-2 w-full rounded-lg bg-[var(--accent)] px-4 py-2 text-xs font-medium text-white transition hover:brightness-110 disabled:opacity-50"
             >
               {posting ? "Posting…" : "Post comment"}
             </button>
             {commentError && (
-              <p className="mt-2 rounded-md border border-red-500/40 bg-red-500/10 px-3 py-2 text-xs text-red-300">
+              <p className="mt-2 rounded-md border border-red-500/40 bg-red-500/10 px-3 py-2 text-xs text-red-700">
                 {commentError}
               </p>
             )}
@@ -422,7 +422,7 @@ export default function StudyViewer({
               <div className="mt-3 flex gap-2">
                 <Link
                   href="/login"
-                  className="flex-1 rounded-lg bg-[var(--accent)] px-3 py-2 text-center text-xs font-medium text-[#04231d] transition hover:brightness-110"
+                  className="flex-1 rounded-lg bg-[var(--accent)] px-3 py-2 text-center text-xs font-medium text-white transition hover:brightness-110"
                 >
                   Sign in
                 </Link>

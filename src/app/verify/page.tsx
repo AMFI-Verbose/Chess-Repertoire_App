@@ -29,7 +29,7 @@ export default async function VerifyPage({
           </p>
           <Link
             href="/community"
-            className="mt-6 inline-block rounded-lg bg-[var(--accent)] px-4 py-2 text-sm font-medium text-[#04231d]"
+            className="mt-6 inline-block rounded-lg bg-[var(--accent)] px-4 py-2 text-sm font-medium text-white"
           >
             Go to the community
           </Link>

@@ -922,6 +922,8 @@ export type StudySummary = {
   author: string;
   source: string;
   plies: number;
+  finalFen: string;
+  result: string;
   commentCount: number;
   createdAt: string;
 };
@@ -955,10 +957,14 @@ export async function listStudies(): Promise<StudySummary[]> {
 
   return rows.map((row) => {
     let plies = 0;
+    let finalFen = new Chess().fen();
+    let result = "";
     try {
       const game = new Chess();
       game.loadPgn(row.pgn);
       plies = game.history().length;
+      finalFen = game.fen();
+      result = game.getHeaders().Result ?? "";
     } catch {
       plies = 0;
     }
@@ -970,10 +976,58 @@ export async function listStudies(): Promise<StudySummary[]> {
       author: row.author,
       source: row.source,
       plies,
+      finalFen,
+      result: result === "*" ? "" : result,
       commentCount: row._count.comments,
       createdAt: row.createdAt.toISOString(),
     };
   });
+}
+
+export type CommunityPulse = {
+  notes: {
+    id: string;
+    author: string;
+    body: string;
+    ply: number;
+    studyId: string;
+    studyTitle: string;
+    createdAt: string;
+  }[];
+  top: { id: string; title: string; notes: number }[];
+};
+
+/** The sidebar of the community index: newest notes and most-annotated games. */
+export async function getCommunityPulse(): Promise<CommunityPulse> {
+  const [notes, top] = await Promise.all([
+    prisma.comment.findMany({
+      orderBy: { createdAt: "desc" },
+      take: 4,
+      include: { study: { select: { id: true, title: true } } },
+    }),
+    prisma.study.findMany({
+      orderBy: { comments: { _count: "desc" } },
+      take: 3,
+      include: { _count: { select: { comments: true } } },
+    }),
+  ]);
+
+  return {
+    notes: notes.map((note) => ({
+      id: note.id,
+      author: note.author,
+      body: note.body,
+      ply: note.ply,
+      studyId: note.study.id,
+      studyTitle: note.study.title,
+      createdAt: note.createdAt.toISOString(),
+    })),
+    top: top.map((study) => ({
+      id: study.id,
+      title: study.title,
+      notes: study._count.comments,
+    })),
+  };
 }
 
 export async function getStudy(id: string): Promise<StudyDetail | null> {

@@ -253,7 +253,7 @@ export default async function DashboardPage() {
                         className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-[var(--line)] text-lg ${
                           repertoire.side === "black"
                             ? "bg-[#1b1f2a] text-[#c9d4e0]"
-                            : "bg-[#e8edf5] text-[#0b0e14]"
+                            : "bg-[#e8edf5] text-[#2e2d29]"
                         }`}
                       >
                         {repertoire.side === "black" ? "♚" : "♔"}
@@ -371,7 +371,7 @@ export default async function DashboardPage() {
 
             <button
               type="submit"
-              className="mt-1 rounded-lg bg-[var(--accent)] px-3 py-2 text-sm font-medium text-[#0b0e14] transition hover:brightness-110"
+              className="mt-1 rounded-lg bg-[var(--accent)] px-3 py-2 text-sm font-medium text-white transition hover:brightness-110"
             >
               Create repertoire
             </button>

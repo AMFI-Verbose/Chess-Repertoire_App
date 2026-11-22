@@ -146,7 +146,7 @@ export default function AuthForm({ mode }: { mode: "signin" | "signup" }) {
       </label>
 
       {error && (
-        <p className="rounded-md border border-red-500/40 bg-red-500/10 px-3 py-2 text-xs text-red-300">
+        <p className="rounded-md border border-red-500/40 bg-red-500/10 px-3 py-2 text-xs text-red-700">
           {error}
         </p>
       )}
@@ -154,7 +154,7 @@ export default function AuthForm({ mode }: { mode: "signin" | "signup" }) {
       <button
         type="submit"
         disabled={busy}
-        className="mt-1 w-full rounded-lg bg-[var(--accent)] px-4 py-2.5 text-sm font-medium text-[#04231d] transition hover:brightness-110 disabled:opacity-60"
+        className="mt-1 w-full rounded-lg bg-[var(--accent)] px-4 py-2.5 text-sm font-medium text-white transition hover:brightness-110 disabled:opacity-60"
       >
         {busy
           ? mode === "signup"
