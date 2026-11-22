@@ -20,6 +20,7 @@ import {
 import type { NodeDTO } from "@/lib/types";
 import { START_RATING, updateRating } from "@/lib/elo";
 import { getViewer } from "@/lib/auth";
+import { rateLimit } from "@/lib/rate-limit";
 
 type DbNode = {
   id: string;
@@ -1008,7 +1009,10 @@ export async function addComment(input: {
   ply?: number;
 }): Promise<CommentDTO | null> {
   const viewer = await getViewer();
-  if (!viewer) return null;
+  if (!viewer || !viewer.emailVerified) return null;
+
+  const commentGate = await rateLimit(`comment:user:${viewer.id}`, 6, 60);
+  if (!commentGate.ok) return null;
 
   const body = input.body.trim().slice(0, 600);
   if (body.length === 0) return null;
@@ -1047,7 +1051,10 @@ export async function publishGameAsStudy(input: {
   author?: string;
 }): Promise<{ studyId: string } | null> {
   const viewer = await getViewer();
-  if (!viewer) return null;
+  if (!viewer || !viewer.emailVerified) return null;
+
+  const publishGate = await rateLimit(`publish:user:${viewer.id}`, 4, 60 * 60);
+  if (!publishGate.ok) return null;
 
   const game = await prisma.game.findUnique({ where: { id: input.gameId } });
   if (!game || !game.pgn.trim()) return null;
@@ -1090,7 +1097,7 @@ export async function publishGameAsStudy(input: {
 /** Take your own study down again. The seeded library stays put. */
 export async function deleteStudy(input: { studyId: string }): Promise<boolean> {
   const viewer = await getViewer();
-  if (!viewer) return false;
+  if (!viewer || !viewer.emailVerified) return false;
 
   const study = await prisma.study.findUnique({
     where: { id: input.studyId },

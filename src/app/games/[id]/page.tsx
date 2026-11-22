@@ -91,6 +91,7 @@ export default async function GamePage({
           <PublishToCommunity
             gameId={game.id}
             handle={viewer?.handle ?? null}
+            verified={viewer?.emailVerified ?? false}
             defaultTitle={
               game.kind === "import"
                 ? `${pgnHeader(game.pgn, "White") || "White"} vs ${pgnHeader(game.pgn, "Black") || "Black"}`

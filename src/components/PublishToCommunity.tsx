@@ -4,6 +4,7 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 
 import { publishGameAsStudy } from "@/app/actions";
+import VerifyNotice from "@/components/VerifyNotice";
 
 /**
  * Put a finished game on the community shelf. The PGN is copied, so editing
@@ -14,11 +15,13 @@ export default function PublishToCommunity({
   defaultTitle,
   defaultSubtitle,
   handle,
+  verified,
 }: {
   gameId: string;
   defaultTitle: string;
   defaultSubtitle: string;
   handle: string | null;
+  verified: boolean;
 }) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
@@ -53,6 +56,15 @@ export default function PublishToCommunity({
       >
         Sign in to publish to Community
       </a>
+    );
+  }
+
+  if (!verified) {
+    return (
+      <div className="flex flex-col gap-2">
+        <p className="text-[11px] text-[var(--muted)]">Publishing as @{handle}</p>
+        <VerifyNotice compact />
+      </div>
     );
   }
 

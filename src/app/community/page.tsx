@@ -2,6 +2,8 @@ import Link from "next/link";
 
 import { listStudies } from "@/app/actions";
 import CommunityBrowser from "@/components/CommunityBrowser";
+import VerifyNotice from "@/components/VerifyNotice";
+import { getViewer } from "@/lib/auth";
 
 export const dynamic = "force-dynamic";
 
@@ -10,7 +12,7 @@ export const metadata = {
 };
 
 export default async function CommunityPage() {
-  const studies = await listStudies();
+  const [studies, viewer] = await Promise.all([listStudies(), getViewer()]);
 
   return (
     <main className="mx-auto max-w-5xl px-6 py-10">
@@ -37,6 +39,12 @@ export default async function CommunityPage() {
           </span>
         </div>
       </header>
+
+      {viewer && !viewer.emailVerified && (
+        <div className="mb-5">
+          <VerifyNotice />
+        </div>
+      )}
 
       {studies.length === 0 ? (
         <div className="rounded-xl border border-dashed border-[var(--line)] p-10 text-center">

@@ -4,7 +4,7 @@ A personal chess opening trainer: build the lines you actually play, play them
 against Stockfish, and have every move graded like Lichess's analysis board —
 with a daily tactic and an annotated study library alongside it.
 
-Next.js 15 · TypeScript · Tailwind 4 · Prisma 6 · SQLite · chess.js · react-chessboard · Stockfish 19 (WASM)
+Next.js 15 · TypeScript · Tailwind 4 · Prisma 6 · PostgreSQL · chess.js · react-chessboard · Stockfish 19 (WASM)
 
 ---
 
@@ -133,7 +133,7 @@ so it is graded on what it costs.
 
 | Puzzles | Community |
 |---|---|
-| A fresh tactic every day from Lichess's public API, plus an **offline library of 30,000 tactics** imported from Lichess's public puzzle database. Practice difficulty tracks your Elo, and every attempt moves a rating (K = 40 / 32 / 24). Streak and accuracy stored in SQLite. | Annotated games (Morphy 1858, Anderssen 1851, Légal's trap) plus **your own games, published from the review page**. Search by title, idea or author, sort by newest / most discussed / A–Z, step through with ← / →, pin a note to the exact move you are looking at, jump back to any annotated position, or copy the whole game into a new repertoire in one click. |
+| A fresh tactic every day from Lichess's public API, plus an **offline library of 30,000 tactics** imported from Lichess's public puzzle database. Practice difficulty tracks your Elo, and every attempt moves a rating (K = 40 / 32 / 24). Streak and accuracy stored in PostgreSQL. | Annotated games (Morphy 1858, Anderssen 1851, Légal's trap) plus **your own games, published from the review page**. Search by title, idea or author, sort by newest / most discussed / A–Z, step through with ← / →, pin a note to the exact move you are looking at, jump back to any annotated position, or copy the whole game into a new repertoire in one click. |
 
 ### Real accounts, and a real Lichess feed
 
@@ -167,7 +167,7 @@ sorts by newest, most discussed or A–Z.
 
 `npm run db:puzzles` streams Lichess's 5M-row puzzle archive through `zstd`,
 keeps tactics in a usable rating band with short solutions, replays each line
-with chess.js to prove it is legal, and bulk-inserts them into SQLite. It is
+with chess.js to prove it is legal, and bulk-inserts them into PostgreSQL. It is
 additive — run it again with `-- --count=60000` to take more. Nothing is
 fetched at play time.
 
@@ -234,20 +234,32 @@ on the machine actually has Pillow (Homebrew's Python ships without it).
 
 ---
 
+## Deployment
+
+PostgreSQL is the only database. Two paths are documented in
+[`docs/deployment.md`](docs/deployment.md): Vercel + hosted Postgres, or a
+self-hosted `docker compose up -d`. Accounts are rate-limited in the database and
+need a confirmed email address before they can publish or comment; mail goes
+through Resend or SMTP, and with neither configured the app prints the
+confirmation link instead of sending it.
+
 ## Quick start
 
 ```bash
 git clone https://github.com/<your-username>/Chess-Repertoire_App.git
 cd Chess-Repertoire_App
 npm install
-cp .env.example .env   # points at a local SQLite file
-npm run db:setup       # database + 2 sample repertoires + 3,865 openings + puzzles and studies
+cp .env.example .env   # one PostgreSQL URL
+npm run db:setup       # migrate + 2 sample repertoires + 3,865 openings + puzzles and studies
 npm run dev            # http://localhost:3000
 ```
 
-Requires Node.js 20+. No engine binary, no external account, no API key —
+Requires Node.js 20+ and a PostgreSQL 14+ database. No engine binary, no API key —
 Stockfish is copied out of `node_modules` automatically by `predev` / `prebuild`,
-and community accounts are created locally in your own database.
+and community accounts live in your own PostgreSQL instance.
+
+With Homebrew: `brew install postgresql@16 && brew services start postgresql@16 &&
+createdb chess_repertoire`, then the example URL above just works.
 
 ### Commands
 
@@ -262,6 +274,7 @@ and community accounts are created locally in your own database.
 | `npm run lichess:import` | Pull today's real Lichess games into the community (network) |
 | `npm run db:puzzles` | Import tactics from Lichess's puzzle archive (needs `.cache/…csv.zst`) |
 | `npm run db:reset` | Wipe + migrate + reseed everything |
+| `npm run db:deploy` | `prisma migrate deploy` — the deploy-time migration step |
 
 ---
 
