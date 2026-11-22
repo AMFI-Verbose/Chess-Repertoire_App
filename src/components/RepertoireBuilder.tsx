@@ -515,7 +515,7 @@ export default function RepertoireBuilder({
               <button
                 onClick={commitPending}
                 disabled={busy}
-                className="ml-auto rounded-lg bg-[var(--accent)] px-3 py-1.5 text-sm font-medium text-[#0b0e14] transition hover:brightness-110 disabled:opacity-50"
+                className="ml-auto rounded-lg bg-[var(--accent)] px-3 py-1.5 text-sm font-medium text-white transition hover:brightness-110 disabled:opacity-50"
               >
                 {busy ? "Adding…" : "Add this move"}
               </button>
@@ -688,7 +688,7 @@ export default function RepertoireBuilder({
             ) : (
               <button
                 onClick={() => setConfirmDelete(true)}
-                className="rounded-lg border border-red-500/40 px-3 py-1.5 text-xs text-red-300 transition hover:bg-red-500/10"
+                className="rounded-lg border border-red-500/40 px-3 py-1.5 text-xs text-red-700 transition hover:bg-red-500/10"
               >
                 Delete this move and everything after it
               </button>
@@ -741,7 +741,7 @@ function CommentBox({
       <button
         onClick={() => onSave(nodeId, value)}
         disabled={!dirty}
-        className="self-end rounded-lg bg-[var(--accent)] px-3 py-1.5 text-xs font-medium text-[#0b0e14] transition hover:brightness-110 disabled:opacity-40"
+        className="self-end rounded-lg bg-[var(--accent)] px-3 py-1.5 text-xs font-medium text-white transition hover:brightness-110 disabled:opacity-40"
       >
         {dirty ? "Save note" : "Saved"}
       </button>
@@ -800,7 +800,7 @@ function ImportPanel({
         <button
           onClick={runImport}
           disabled={busy || pgn.trim().length === 0}
-          className="rounded-lg bg-[var(--accent)] px-3 py-1.5 text-xs font-medium text-[#0b0e14] transition hover:brightness-110 disabled:opacity-40"
+          className="rounded-lg bg-[var(--accent)] px-3 py-1.5 text-xs font-medium text-white transition hover:brightness-110 disabled:opacity-40"
         >
           {busy ? "Importing…" : "Import"}
         </button>

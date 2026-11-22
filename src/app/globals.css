@@ -1,15 +1,15 @@
 @import "tailwindcss";
 
 /* Design tokens. Change a colour here and the whole app follows.
-   Palette follows Lichess's warm dark surface with Chess.com's green accent. */
+   Warm paper, near-black ink, one green accent — the Lichess light surface. */
 :root {
-  --bg: #161512;
-  --panel: #211f1e;
-  --panel-2: #2b2926;
-  --line: #37332f;
-  --text: #e9e6e1;
-  --muted: #9a958c;
-  --accent: #81b64c;
+  --bg: #f2f1ec;
+  --panel: #ffffff;
+  --panel-2: #f7f6f1;
+  --line: #d9d7ce;
+  --text: #2e2d29;
+  --muted: #75726a;
+  --accent: #629924;
 }
 
 @theme inline {

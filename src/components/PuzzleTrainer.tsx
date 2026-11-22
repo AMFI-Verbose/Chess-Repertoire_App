@@ -383,7 +383,7 @@ export default function PuzzleTrainer({
           </div>
 
           {status === "solved" && (
-            <div className="animate-pop pointer-events-none absolute left-1/2 top-4 -translate-x-1/2 rounded-lg bg-[#26c2a3] px-4 py-2 text-sm font-semibold text-[#04231d] shadow-lg">
+            <div className="animate-pop pointer-events-none absolute left-1/2 top-4 -translate-x-1/2 rounded-lg bg-[#26c2a3] px-4 py-2 text-sm font-semibold text-white shadow-lg">
               Solved · {puzzle.rating} rating
             </div>
           )}
@@ -410,7 +410,7 @@ export default function PuzzleTrainer({
           <button
             onClick={nextPuzzle}
             disabled={loading}
-            className="rounded-lg bg-[var(--accent)] px-4 py-2 text-sm font-medium text-[#04231d] transition hover:brightness-110 disabled:opacity-60"
+            className="rounded-lg bg-[var(--accent)] px-4 py-2 text-sm font-medium text-white transition hover:brightness-110 disabled:opacity-60"
           >
             {loading ? "Loading…" : "Next puzzle"}
           </button>

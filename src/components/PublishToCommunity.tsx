@@ -72,7 +72,7 @@ export default function PublishToCommunity({
     return (
       <button
         onClick={() => setOpen(true)}
-        className="rounded-lg border border-[var(--accent)] px-3 py-2 text-[11px] font-medium text-[var(--accent)] transition hover:bg-[var(--accent)] hover:text-[#04231d]"
+        className="rounded-lg border border-[var(--accent)] px-3 py-2 text-[11px] font-medium text-[var(--accent)] transition hover:bg-[var(--accent)] hover:text-white"
       >
         Publish to Community
       </button>
@@ -109,7 +109,7 @@ export default function PublishToCommunity({
       <button
         onClick={publish}
         disabled={busy}
-        className="w-full rounded-md bg-[var(--accent)] px-3 py-1.5 text-[11px] font-medium text-[#04231d] transition hover:brightness-110 disabled:opacity-60"
+        className="w-full rounded-md bg-[var(--accent)] px-3 py-1.5 text-[11px] font-medium text-white transition hover:brightness-110 disabled:opacity-60"
       >
         {busy ? "Publishing…" : "Publish and open"}
       </button>
