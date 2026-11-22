@@ -312,11 +312,16 @@ model Tournament {
   startsAt    DateTime
   endsAt      DateTime
   timeControl String   @default("3+2")
+  source      String   @default("local") // local | lichess | chess.com
+  externalId  String?
+  externalUrl String?
+  players     Int      @default(0)
   createdAt   DateTime @default(now())
   entries     TournamentEntry[]
   duels       Duel[]
 
   @@index([endsAt])
+  @@unique([source, externalId])
 }
 
 model TournamentEntry {

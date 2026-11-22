@@ -1,9 +1,10 @@
 import Link from "next/link";
 import { listStudies } from "@/app/actions";
 import MiniBoard from "@/components/MiniBoard";
+import StaticBoard from "@/components/StaticBoard";
 import { getViewer } from "@/lib/auth";
 import { listOpenDuels } from "@/lib/duels";
-import { listOpenTournaments } from "@/lib/tournaments";
+import { listOpenTournaments, refreshTournamentCalendar } from "@/lib/tournaments";
 import { prisma } from "@/lib/prisma";
 import { createRepertoire } from "./actions";
 import { opponentLabel } from "@/lib/bots";
@@ -21,6 +22,8 @@ function arenaGap(targetIso: string, now: number) {
 }
 
 export default async function DashboardPage() {
+  // Real Lichess arenas, refreshed at most every ten minutes.
+  await refreshTournamentCalendar();
   const viewer = await getViewer();
   const train = await getTrainOverview();
   const trainDue = train.reduce((sum, item) => sum + item.due + item.fresh, 0);
@@ -78,7 +81,7 @@ export default async function DashboardPage() {
         select: { id: true, fen: true, title: true, rating: true, day: true },
       }),
       prisma.user.count(),
-      listOpenTournaments(4),
+      listOpenTournaments(200),
       prisma.donation.aggregate({ _sum: { amountCents: true }, _count: true }),
     ]);
 
@@ -96,6 +99,18 @@ export default async function DashboardPage() {
   ];
   void studyCount;
   const raised = Math.round((donations._sum.amountCents ?? 0) / 100);
+
+  // Keep the home card mixed: a couple of Lichess events, a chess.com one, and ours.
+  const featured = Array.from(
+    new Map(
+      [
+        ...tournaments.filter((event) => event.source === "lichess").slice(0, 2),
+        ...tournaments.filter((event) => event.source === "chess.com").slice(0, 1),
+        ...tournaments.filter((event) => event.source === "local").slice(0, 1),
+        ...tournaments,
+      ].map((event) => [event.id, event]),
+    ).values(),
+  ).slice(0, 4);
 
   return (
     <main className="mx-auto max-w-5xl px-6 py-14">
@@ -415,10 +430,10 @@ export default async function DashboardPage() {
           <h2 className="text-[11px] font-medium uppercase tracking-wider text-[var(--muted)]">
             The club
           </h2>
-          <span className="text-[10.5px] text-[var(--muted)]">Tournaments, shop and support</span>
+          <span className="text-[10.5px] text-[var(--muted)]">Lichess and chess.com events, our arenas, support</span>
         </div>
 
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+        <div className="grid gap-4 sm:grid-cols-2">
           {/* Donate — the same quiet card Lichess puts at the top left. */}
           <Link
             href="/support"
@@ -438,7 +453,7 @@ export default async function DashboardPage() {
             </span>
           </Link>
 
-          {/* Open tournaments — a real arena list, not a placeholder banner. */}
+          {/* Open tournaments — real events pulled from Lichess and chess.com. */}
           <div className="rounded-xl border border-[var(--line)] bg-[var(--panel)] p-4">
             <div className="flex items-baseline justify-between">
               <h3 className="text-[15px] font-semibold">Open tournaments</h3>
@@ -448,85 +463,97 @@ export default async function DashboardPage() {
             </div>
             {tournaments.length === 0 ? (
               <p className="mt-3 text-[11.5px] leading-relaxed text-[var(--muted)]">
-                No arena scheduled.{" "}
+                Nothing imported right now.{" "}
                 <Link href="/tournaments" className="text-[var(--accent)] underline">
-                  Create one
+                  Check the calendar
                 </Link>
                 .
               </p>
             ) : (
               <ul className="mt-2 divide-y divide-[var(--line)]">
-                {tournaments.slice(0, 3).map((tournament) => {
+                {featured.map((tournament) => {
                   const live = tournament.status === "live";
+                  const external = tournament.source !== "local";
+                  const href = tournament.externalUrl ?? `/tournaments/${tournament.id}`;
+                  const sourceLabel =
+                    tournament.source === "lichess"
+                      ? "Lichess"
+                      : tournament.source === "chess.com"
+                        ? "chess.com"
+                        : "Club";
+                  const elapsed = live
+                    ? ((Date.now() - new Date(tournament.startsAt).getTime()) /
+                        Math.max(
+                          1,
+                          new Date(tournament.endsAt).getTime() -
+                            new Date(tournament.startsAt).getTime(),
+                        )) *
+                      100
+                    : 6;
                   return (
                     <li key={tournament.id}>
-                      <Link
-                        href={`/tournaments/${tournament.id}`}
+                      <a
+                        href={href}
+                        target={external ? "_blank" : undefined}
+                        rel={external ? "noreferrer" : undefined}
                         className="block py-2 transition hover:bg-[var(--panel-2)]"
                       >
                         <span className="flex items-center justify-between gap-2">
-                          <span className="truncate text-[12px]">
-                            {live ? "● " : "○ "}
-                            {tournament.name}
+                          <span className="flex min-w-0 items-center gap-1.5">
+                            <span
+                              className={`shrink-0 rounded px-1.5 py-0.5 text-[9px] font-medium uppercase tracking-wide ${
+                                tournament.source === "lichess"
+                                  ? "bg-[#e9e2f5] text-[#5c3d91]"
+                                  : tournament.source === "chess.com"
+                                    ? "bg-[#e2f0e4] text-[#2f6f3e]"
+                                    : "bg-[var(--panel-2)] text-[var(--muted)]"
+                              }`}
+                            >
+                              {sourceLabel}
+                            </span>
+                            <span className="truncate text-[12px]">
+                              {live ? "● " : "○ "}
+                              {tournament.name}
+                            </span>
                           </span>
                           <span className="shrink-0 text-[10px] text-[var(--muted)]">
-                            {tournament.timeControl.replace("+", "+")}
+                            {tournament.timeControl}
                           </span>
                         </span>
                         <span className="mt-1 flex items-center gap-2 text-[10px] text-[var(--muted)]">
-                          <span className="h-1.5 flex-1 overflow-hidden rounded-full bg-[var(--panel-2)]">
-                            <span
-                              className="block h-full rounded-full bg-[linear-gradient(90deg,#d9c8a0,#b9a173)]"
-                              style={{
-                                width: `${Math.max(
-                                  6,
-                                  Math.min(
-                                    100,
-                                    live
-                                      ? ((Date.now() - new Date(tournament.startsAt).getTime()) /
-                                          Math.max(
-                                            1,
-                                            new Date(tournament.endsAt).getTime() -
-                                              new Date(tournament.startsAt).getTime(),
-                                          )) *
-                                          100
-                                      : 6,
-                                  ),
-                                )}%`,
-                              }}
-                            />
-                          </span>
+                          {external ? (
+                            <span className="flex-1 truncate">
+                              {live ? "Live now" : "Starts soon"} ·{" "}
+                              {tournament.players > 0
+                                ? `${tournament.players} players`
+                                : "registration open"}
+                            </span>
+                          ) : (
+                            <>
+                              <span className="h-1.5 flex-1 overflow-hidden rounded-full bg-[var(--panel-2)]">
+                                <span
+                                  className="block h-full rounded-full bg-[linear-gradient(90deg,#d9c8a0,#b9a173)]"
+                                  style={{
+                                    width: `${Math.max(6, Math.min(100, elapsed))}%`,
+                                  }}
+                                />
+                              </span>
+                              <span className="shrink-0">{tournament.players} players</span>
+                            </>
+                          )}
                           <span className="shrink-0">
                             {live
                               ? `${arenaGap(tournament.endsAt, Date.now())} left`
-                              : `in ${arenaGap(tournament.startsAt, Date.now())}`}{" "}
-                            · {tournament.players} players
+                              : `in ${arenaGap(tournament.startsAt, Date.now())}`}
                           </span>
                         </span>
-                      </Link>
+                      </a>
                     </li>
                   );
                 })}
               </ul>
             )}
           </div>
-
-          {/* Swag Store — the four real products. */}
-          <Link
-            href="/store"
-            className="group flex items-start gap-4 rounded-xl border border-[var(--line)] bg-[var(--panel)] p-4 transition hover:border-[#c89b4a]"
-          >
-            <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-[#f3e7cf] text-2xl text-[#a9782b]">
-              ♜
-            </span>
-            <span className="min-w-0 flex-1">
-              <span className="block text-[15px] font-semibold text-[#8a5f1d]">Swag Store</span>
-              <span className="mt-0.5 block text-[11.5px] text-[var(--muted)]">
-                Play chess in style — tees, hoodies, mugs and totes
-              </span>
-              <span className="mt-2 block text-[11px] text-[#a9782b]">Browse the shop →</span>
-            </span>
-          </Link>
         </div>
 
         <div className="grid gap-4 lg:grid-cols-[minmax(0,1.55fr)_minmax(0,1fr)_minmax(0,1.1fr)]">
@@ -542,7 +569,7 @@ export default async function DashboardPage() {
             </div>
             <Link href="/puzzles" className="group flex items-start gap-4">
               {dailyPuzzle ? (
-                <MiniBoard fen={dailyPuzzle.fen} size={196} />
+                <StaticBoard fen={dailyPuzzle.fen} size={196} />
               ) : (
                 <div className="flex h-[196px] w-[196px] items-center justify-center rounded-md border border-dashed border-[var(--line)] text-[11px] text-[var(--muted)]">
                   No puzzle imported yet
