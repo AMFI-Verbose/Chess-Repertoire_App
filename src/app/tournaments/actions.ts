@@ -8,10 +8,16 @@ import {
   findTournamentGame,
   joinTournament,
   leaveTournament,
+  refreshTournamentCalendar,
 } from "@/lib/tournaments";
 
 function back(path: string, message: string) {
   redirect(`${path}?error=${encodeURIComponent(message)}`);
+}
+
+export async function refreshCalendarAction() {
+  await refreshTournamentCalendar(true);
+  redirect("/tournaments");
 }
 
 export async function createTournamentAction(formData: FormData) {

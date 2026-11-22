@@ -1,21 +1,27 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Link, { useLinkStatus } from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 
 import { signOutAction } from "@/app/auth/actions";
 
-const LINKS = [
+const PRIMARY = [
   { href: "/", label: "Repertoires" },
   { href: "/play", label: "Play" },
-  { href: "/openings", label: "Openings" },
   { href: "/puzzles", label: "Puzzles" },
   { href: "/learn", label: "Learn" },
   { href: "/train", label: "Train" },
+];
+
+const MORE = [
+  { href: "/openings", label: "Openings" },
   { href: "/games", label: "Games" },
   { href: "/community", label: "Community" },
+  { href: "/tournaments", label: "Tournaments" },
 ];
+
+const ALL = [...PRIMARY, ...MORE];
 
 /**
  * A link that says "working on it" the moment it is tapped. Without this, a
@@ -41,19 +47,34 @@ export default function AppNav({
   const pathname = usePathname();
   const router = useRouter();
   const [open, setOpen] = useState(false);
+  const [more, setMore] = useState(false);
+  const moreRef = useRef<HTMLDivElement | null>(null);
 
-  // A route change closes the sheet; a tap closes it immediately too, so
-  // choosing the page you are already on never looks like a dead button.
-  useEffect(() => setOpen(false), [pathname]);
+  // A route change closes both surfaces; a tap closes the sheet immediately
+  // too, so choosing the page you are already on never looks dead.
+  useEffect(() => {
+    setOpen(false);
+    setMore(false);
+  }, [pathname]);
 
   useEffect(() => {
-    if (!open) return;
+    if (!open && !more) return;
     function onKey(event: KeyboardEvent) {
-      if (event.key === "Escape") setOpen(false);
+      if (event.key === "Escape") {
+        setOpen(false);
+        setMore(false);
+      }
+    }
+    function onPointer(event: PointerEvent) {
+      if (moreRef.current && !moreRef.current.contains(event.target as Node)) setMore(false);
     }
     window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [open]);
+    window.addEventListener("pointerdown", onPointer);
+    return () => {
+      window.removeEventListener("keydown", onKey);
+      window.removeEventListener("pointerdown", onPointer);
+    };
+  }, [open, more]);
 
   function isActive(href: string) {
     // Exact-segment matching: plain startsWith would make "/play" match
@@ -64,11 +85,11 @@ export default function AppNav({
   }
 
   const linkClass = (href: string, wide: boolean) =>
-    `block rounded-md text-center transition ${
-      wide ? "px-2.5 py-1.5" : "px-2 py-2 text-[13px]"
+    `flex min-h-9 items-center justify-center whitespace-nowrap rounded-md text-center transition ${
+      wide ? "px-3 py-1.5" : "px-2 py-2 text-[13px]"
     } ${
       isActive(href)
-        ? "bg-[var(--panel)] text-[var(--text)]"
+        ? "bg-[var(--panel)] font-medium text-[var(--text)] shadow-[inset_0_-2px_0_var(--accent)]"
         : "text-[var(--muted)] hover:bg-[var(--panel)]/60 hover:text-[var(--text)]"
     }`;
 
@@ -84,18 +105,50 @@ export default function AppNav({
           </span>
         </Link>
 
-        {/* Wide screens: every link inline. */}
-        <nav className="ml-auto hidden min-w-0 items-center gap-0.5 text-sm lg:flex">
-          {LINKS.map((link) => (
-            <Link
-              key={link.href}
-              href={link.href}
-              onClick={() => setOpen(false)}
-              className={linkClass(link.href, true)}
-            >
+        {/* Wide screens: five primary links plus a real More menu. Keeps the
+            header narrow enough that no link ever slides under the account
+            controls. */}
+        <nav className="relative z-10 ml-auto hidden shrink-0 items-center gap-1 text-sm lg:flex">
+          {PRIMARY.map((link) => (
+            <Link key={link.href} href={link.href} className={linkClass(link.href, true)}>
               <PendingAware>{link.label}</PendingAware>
             </Link>
           ))}
+
+          <div ref={moreRef} className="relative">
+            <button
+              onClick={() => setMore((value) => !value)}
+              aria-expanded={more}
+              aria-haspopup="menu"
+              className={`flex min-h-9 items-center rounded-md px-3 py-1.5 text-sm transition ${
+                more || MORE.some((link) => isActive(link.href))
+                  ? "bg-[var(--panel)] text-[var(--text)]"
+                  : "text-[var(--muted)] hover:bg-[var(--panel)]/60 hover:text-[var(--text)]"
+              }`}
+            >
+              More ▾
+            </button>
+            {more && (
+              <div
+                role="menu"
+                className="absolute right-0 top-full z-40 mt-1 min-w-[160px] overflow-hidden rounded-md border border-[var(--line)] bg-[var(--panel)] py-1 shadow-lg"
+              >
+                {MORE.map((link) => (
+                  <Link
+                    key={link.href}
+                    href={link.href}
+                    role="menuitem"
+                    onClick={() => setMore(false)}
+                    className={`block px-3 py-2 text-[12.5px] transition hover:bg-[var(--panel-2)] ${
+                      isActive(link.href) ? "font-medium text-[var(--accent)]" : "text-[var(--text)]"
+                    }`}
+                  >
+                    {link.label}
+                  </Link>
+                ))}
+              </div>
+            )}
+          </div>
         </nav>
 
         {/* Narrow screens: one reliable target instead of clipped links. */}
@@ -148,7 +201,7 @@ export default function AppNav({
       {open && (
         <nav className="border-t border-[var(--line)] bg-[var(--bg)] px-3 pb-3 pt-2 lg:hidden">
           <div className="grid grid-cols-3 gap-1.5">
-            {LINKS.map((link) => (
+            {ALL.map((link) => (
               <Link
                 key={link.href}
                 href={link.href}
