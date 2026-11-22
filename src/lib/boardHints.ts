@@ -18,7 +18,12 @@ const LEGAL_CAPTURE =
 const CHECK_TINT =
   "radial-gradient(circle, rgba(235, 72, 63, 0.85) 0%, rgba(235, 72, 63, 0.55) 55%, transparent 78%)";
 
-const SELECTED_TINT = "rgba(255, 214, 102, 0.55)";
+// A square's base colour is an inline background-color from the board theme,
+// so a selected state has to be painted as an image (or it is silently
+// overridden). The inset ring keeps the piece readable on both square colours.
+const SELECTED_TINT =
+  "linear-gradient(rgba(155, 199, 0, 0.55), rgba(155, 199, 0, 0.55))";
+const SELECTED_RING = "inset 0 0 0 3px rgba(102, 143, 0, 0.95)";
 
 export type SquareStyle = {
   backgroundImage?: string;
@@ -105,7 +110,8 @@ export function hintStyles(
   if (selected) {
     styles[selected] = {
       ...(styles[selected] ?? {}),
-      backgroundColor: SELECTED_TINT,
+      backgroundImage: SELECTED_TINT,
+      boxShadow: SELECTED_RING,
     };
   }
 

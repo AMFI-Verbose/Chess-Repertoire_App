@@ -55,11 +55,14 @@ export default function PlayVsEngine({
   repertoireId,
   name = "Play",
   side = "white",
+  embedded = false,
 }: {
   /** Set when playing from a repertoire's Play tab; absent on /play. */
   repertoireId?: string;
   name?: string;
   side?: "white" | "black";
+  /** Rendered inside the play hub instead of owning the page shell. */
+  embedded?: boolean;
 }) {
   const [phase, setPhase] = useState<Phase>("setup");
 
@@ -619,8 +622,11 @@ export default function PlayVsEngine({
   const theirMs = youPlay === "w" ? blackMs : whiteMs;
   const yourTurn = turnOf(fen) === youPlay;
 
+  const Shell = embedded ? "div" : "main";
+
   return (
-    <main className="mx-auto w-full max-w-6xl px-6 py-8">
+    <Shell className={embedded ? "w-full" : "mx-auto w-full max-w-6xl px-6 py-8"}>
+      {!embedded && (
       <header className="mb-6 flex flex-wrap items-end justify-between gap-4">
         <div>
           <Link
@@ -644,6 +650,7 @@ export default function PlayVsEngine({
         </div>
         {repertoireId ? <ModeTabs repertoireId={repertoireId} active="play" /> : null}
       </header>
+      )}
 
       {phase === "setup" ? (
         <div className="mx-auto w-full max-w-2xl">
@@ -998,7 +1005,7 @@ export default function PlayVsEngine({
           </aside>
         </div>
       )}
-    </main>
+    </Shell>
   );
 }
 
