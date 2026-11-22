@@ -327,7 +327,7 @@ export default function StudyViewer({ study }: { study: StudyDetail }) {
                   <div className="flex flex-wrap items-baseline gap-2">
                     <span className="text-xs font-medium">{comment.author}</span>
                     <span className="text-[10px] text-[var(--muted)]">
-                      {new Date(comment.createdAt).toLocaleDateString()}
+                      {new Date(comment.createdAt).toISOString().slice(0, 10)}
                     </span>
                     {comment.ply > 0 && (
                       <button
