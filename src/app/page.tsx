@@ -2,11 +2,15 @@ import Link from "next/link";
 import { prisma } from "@/lib/prisma";
 import { createRepertoire } from "./actions";
 import { opponentLabel } from "@/lib/bots";
+import { getTrainOverview } from "@/app/train/actions";
 
 // Read from the database on every request — never serve a stale cached page.
 export const dynamic = "force-dynamic";
 
 export default async function DashboardPage() {
+  const train = await getTrainOverview();
+  const trainDue = train.reduce((sum, item) => sum + item.due + item.fresh, 0);
+
   const [
     repertoires,
     openingCount,
@@ -111,6 +115,28 @@ export default async function DashboardPage() {
           </div>
         ))}
       </div>
+
+      {trainDue > 0 && (
+        <Link
+          href="/train"
+          className="group mb-3 flex flex-wrap items-center gap-4 rounded-xl border border-[var(--line)] bg-[var(--panel)] px-5 py-3.5 transition hover:border-[var(--accent)]"
+        >
+          <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-[var(--line)] bg-[var(--panel-2)] text-base">
+            ⟳
+          </span>
+          <span className="min-w-0 flex-1">
+            <span className="block font-medium">
+              {trainDue} positions due in your repertoires
+            </span>
+            <span className="mt-0.5 block text-xs text-[var(--muted)]">
+              Spaced repetition: the lines you saved, asked back at the right moment
+            </span>
+          </span>
+          <span className="text-xs text-[var(--accent)] transition group-hover:translate-x-0.5">
+            Train →
+          </span>
+        </Link>
+      )}
 
       <Link
         href="/learn"

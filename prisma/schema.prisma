@@ -180,4 +180,7 @@ model Review {
   ease       Float     @default(2.5) // multiplier applied on each success
   dueAt      DateTime  @default(now())
   lastSeenAt DateTime?
+
+  // Every session asks "what is due", so the scheduler column is indexed.
+  @@index([dueAt])
 }
