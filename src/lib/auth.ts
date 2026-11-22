@@ -12,7 +12,12 @@ import { prisma } from "@/lib/prisma";
 const COOKIE = "session";
 const DAY = 24 * 60 * 60 * 1000;
 
-export type Viewer = { id: string; handle: string; email: string };
+export type Viewer = {
+  id: string;
+  handle: string;
+  email: string;
+  emailVerified: boolean;
+};
 
 export function hashPassword(password: string): string {
   const salt = randomBytes(16).toString("hex");
@@ -61,7 +66,9 @@ export async function getViewer(): Promise<Viewer | null> {
 
   const session = await prisma.session.findUnique({
     where: { id: token },
-    include: { user: { select: { id: true, handle: true, email: true } } },
+    include: {
+      user: { select: { id: true, handle: true, email: true, emailVerified: true } },
+    },
   });
   if (!session) return null;
 

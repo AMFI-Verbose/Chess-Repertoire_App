@@ -18,6 +18,7 @@ export default function AuthForm({ mode }: { mode: "signin" | "signup" }) {
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [done, setDone] = useState<{ message?: string; devLink?: string } | null>(null);
 
   async function submit(event: React.FormEvent) {
     event.preventDefault();
@@ -33,6 +34,12 @@ export default function AuthForm({ mode }: { mode: "signin" | "signup" }) {
         setError(result.error);
         return;
       }
+      if (mode === "signup") {
+        // Stay on the page: the account is created but the address is not
+        // confirmed yet, and the next step is clicking that link.
+        setDone({ message: result.message, devLink: result.devLink });
+        return;
+      }
       router.push("/community");
       router.refresh();
     } catch {
@@ -40,6 +47,34 @@ export default function AuthForm({ mode }: { mode: "signin" | "signup" }) {
     } finally {
       setBusy(false);
     }
+  }
+
+  if (done) {
+    return (
+      <div className="flex flex-col gap-3">
+        <p className="text-sm font-medium text-[var(--accent)]">Account created</p>
+        <p className="text-xs leading-relaxed text-[var(--muted)]">
+          {done.message ?? "Confirm your email to unlock publishing and notes."}
+        </p>
+        {done.devLink && (
+          <a
+            href={done.devLink}
+            className="break-all rounded-md border border-[var(--accent)]/50 px-3 py-2 text-xs text-[var(--accent)] underline"
+          >
+            No mail server configured — open your confirmation link (local mode)
+          </a>
+        )}
+        <button
+          onClick={() => {
+            router.push("/community");
+            router.refresh();
+          }}
+          className="rounded-lg border border-[var(--line)] px-4 py-2 text-xs text-[var(--muted)] transition hover:text-[var(--text)]"
+        >
+          Continue to the community
+        </button>
+      </div>
+    );
   }
 
   const inputClass =

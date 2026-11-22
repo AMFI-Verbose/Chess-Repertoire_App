@@ -18,12 +18,14 @@
     "db:content": "node scripts/seed-community.mjs",
     "db:puzzles": "node scripts/import-lichess-puzzles.mjs",
     "check:lessons": "tsx scripts/check-lessons.mts",
-    "lichess:import": "node scripts/import-lichess.mjs --count=10"
+    "lichess:import": "node scripts/import-lichess.mjs --count=10",
+    "db:deploy": "prisma migrate deploy"
   },
   "dependencies": {
     "@prisma/client": "^6.19.3",
     "chess.js": "^1.4.0",
     "next": "15.5.29",
+    "nodemailer": "^10.6.1",
     "react": "19.1.0",
     "react-chessboard": "^5.12.1",
     "react-dom": "19.1.0",
@@ -33,6 +35,7 @@
     "@eslint/eslintrc": "^3",
     "@tailwindcss/postcss": "^4",
     "@types/node": "^20",
+    "@types/nodemailer": "^8.0.2",
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "eslint": "^9",

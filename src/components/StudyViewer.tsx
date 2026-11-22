@@ -15,6 +15,7 @@ import {
 import { DARK_SQUARE, LIGHT_SQUARE, squaresOf, tint } from "@/lib/boardTheme";
 import { START_FEN } from "@/lib/chess";
 import { play } from "@/lib/sound";
+import VerifyNotice from "@/components/VerifyNotice";
 
 type Move = { san: string; uci: string; after: string };
 
@@ -23,12 +24,13 @@ export default function StudyViewer({
   viewer,
 }: {
   study: StudyDetail;
-  viewer: { id: string; handle: string } | null;
+  viewer: { id: string; handle: string; emailVerified: boolean } | null;
 }) {
   const router = useRouter();
   const [at, setAt] = useState(0);
   const [body, setBody] = useState("");
   const [posting, setPosting] = useState(false);
+  const [commentError, setCommentError] = useState<string | null>(null);
   const [importing, setImporting] = useState(false);
   const [anchor, setAnchor] = useState(true);
   const [confirmDelete, setConfirmDelete] = useState(false);
@@ -93,14 +95,19 @@ export default function StudyViewer({
     event.preventDefault();
     if (body.trim().length === 0 || posting) return;
     setPosting(true);
+    setCommentError(null);
     try {
-      await addComment({
+      const created = await addComment({
         studyId: study.id,
         body,
         // Anchor the note to the position on screen, so the thread reads as
         // annotations rather than floating opinions.
         ply: anchor ? at : 0,
       });
+      if (!created) {
+        setCommentError("That note did not go through. You can post 6 notes a minute — wait a moment and try again.");
+        return;
+      }
       setBody("");
       router.refresh();
     } finally {
@@ -367,7 +374,11 @@ export default function StudyViewer({
             ))}
           </div>
 
-          {viewer ? (
+          {viewer && !viewer.emailVerified ? (
+            <div className="mt-5 border-t border-[var(--line)] pt-4">
+              <VerifyNotice compact />
+            </div>
+          ) : viewer ? (
           <form onSubmit={submitComment} className="mt-5 border-t border-[var(--line)] pt-4">
             <p className="mb-2 text-[11px] text-[var(--muted)]">
               Posting as <span className="font-medium text-[var(--accent)]">@{viewer.handle}</span>
@@ -397,6 +408,11 @@ export default function StudyViewer({
             >
               {posting ? "Posting…" : "Post comment"}
             </button>
+            {commentError && (
+              <p className="mt-2 rounded-md border border-red-500/40 bg-red-500/10 px-3 py-2 text-xs text-red-300">
+                {commentError}
+              </p>
+            )}
           </form>
           ) : (
             <div className="mt-5 border-t border-[var(--line)] pt-4">

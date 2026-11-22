@@ -1,6 +1,7 @@
 import Link from "next/link";
 
 import AuthForm from "@/components/AuthForm";
+import VerifyNotice from "@/components/VerifyNotice";
 import { getViewer } from "@/lib/auth";
 
 export const dynamic = "force-dynamic";
@@ -22,10 +23,19 @@ export default async function SignupPage() {
       </p>
 
       {viewer ? (
-        <div className="mt-6 rounded-xl border border-[var(--line)] bg-[var(--panel)] p-5 text-sm">
-          You are already signed in as
-          <span className="ml-1 font-medium text-[var(--accent)]">@{viewer.handle}</span>.
-          <Link href="/community" className="mt-3 block text-xs text-[var(--muted)] underline">
+        <div className="mt-6 flex flex-col gap-3 rounded-xl border border-[var(--line)] bg-[var(--panel)] p-5 text-sm">
+          <p>
+            Signed in as
+            <span className="ml-1 font-medium text-[var(--accent)]">@{viewer.handle}</span>.
+          </p>
+          {viewer.emailVerified ? (
+            <p className="text-xs text-[var(--muted)]">
+              Your email is confirmed. Publishing and notes are unlocked.
+            </p>
+          ) : (
+            <VerifyNotice compact />
+          )}
+          <Link href="/community" className="text-xs text-[var(--muted)] underline">
             Back to the community
           </Link>
         </div>

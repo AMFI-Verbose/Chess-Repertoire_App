@@ -30,7 +30,11 @@ export default async function StudyPage({
 
       <StudyViewer
         study={study}
-        viewer={viewer ? { id: viewer.id, handle: viewer.handle } : null}
+        viewer={
+          viewer
+            ? { id: viewer.id, handle: viewer.handle, emailVerified: viewer.emailVerified }
+            : null
+        }
       />
     </main>
   );
