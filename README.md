@@ -133,7 +133,7 @@ so it is graded on what it costs.
 
 | Puzzles | Community |
 |---|---|
-| A fresh tactic every day from Lichess's public API, plus an **offline library of 30,000 tactics** imported from Lichess's public puzzle database. Practice difficulty tracks your Elo, and every attempt moves a rating (K = 40 / 32 / 24). Streak and accuracy stored in SQLite. | Annotated games (Morphy 1858, Anderssen 1851, Légal's trap) with a comment thread on each. Step through with ← / →, post a comment, or copy the whole game into a new repertoire in one click. |
+| A fresh tactic every day from Lichess's public API, plus an **offline library of 30,000 tactics** imported from Lichess's public puzzle database. Practice difficulty tracks your Elo, and every attempt moves a rating (K = 40 / 32 / 24). Streak and accuracy stored in SQLite. | Annotated games (Morphy 1858, Anderssen 1851, Légal's trap) plus **your own games, published from the review page**. Search by title, idea or author, sort by newest / most discussed / A–Z, step through with ← / →, pin a note to the exact move you are looking at, jump back to any annotated position, or copy the whole game into a new repertoire in one click. |
 
 ### The puzzle library
 

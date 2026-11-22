@@ -1,5 +1,21 @@
 import { Chess, type Square } from "chess.js";
 
+/**
+ * Does this attempted move promote? A pawn arriving on rank 8 or rank 1 has to
+ * become something, and quietly assuming a queen throws away underpromotion.
+ * Every board that accepts a human move asks this before it commits.
+ */
+export function isPromotion(fen: string, from: string, to: string): boolean {
+  try {
+    const game = new Chess(fen);
+    const piece = game.get(from as Square);
+    if (!piece || piece.type !== "p") return false;
+    return to[1] === "8" || to[1] === "1";
+  } catch {
+    return false;
+  }
+}
+
 /** The standard starting position, in FEN notation. */
 export const START_FEN = new Chess().fen();
 

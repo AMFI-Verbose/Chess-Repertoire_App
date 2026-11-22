@@ -3,8 +3,10 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { Chess } from "chess.js";
+import { isPromotion } from "@/lib/chess";
 import { Chessboard } from "react-chessboard";
 
+import PromotionPicker, { type PromotionPiece } from "@/components/PromotionPicker";
 import { gradeCard } from "@/app/train/actions";
 import { DARK_SQUARE, LIGHT_SQUARE } from "@/lib/boardTheme";
 import type { TrainerCard } from "@/lib/trainer";
@@ -37,6 +39,7 @@ export default function RepertoireTrainer({
   const [stats, setStats] = useState({ right: 0, wrong: 0 });
   const [pending, setPending] = useState(false);
   const [saved, setSaved] = useState<string | null>(null);
+  const [promo, setPromo] = useState<{ from: string; to: string } | null>(null);
 
   const card = cards[index];
 
@@ -49,17 +52,24 @@ export default function RepertoireTrainer({
     setLastMove(null);
     setFeedback(null);
     setSaved(null);
+    setPromo(null);
     setPhase("asking");
   }, [card]);
 
   const total = cards.length;
 
-  const answer = useCallback(async (from: string, to: string) => {
+  const answer = useCallback(
+    async (from: string, to: string, promotion?: PromotionPiece) => {
     if (!card || phase !== "asking" || pending) return;
+    // Pick the piece first: grading an underpromotion as a queen is wrong.
+    if (!promotion && isPromotion(card.fen, from, to)) {
+      setPromo({ from, to });
+      return;
+    }
     const trial = new Chess(card.fen);
     let move;
     try {
-      move = trial.move({ from, to, promotion: "q" });
+      move = trial.move({ from, to, promotion: promotion ?? "q" });
     } catch {
       return;
     }
@@ -271,7 +281,18 @@ export default function RepertoireTrainer({
 
       <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_320px]">
         <section className="flex flex-col items-center gap-3">
-          <div className="w-full max-w-[520px] overflow-hidden rounded-xl border border-[var(--line)] shadow-[0_10px_40px_-20px_rgba(0,0,0,0.9)]">
+          <div className="relative w-full max-w-[520px] overflow-hidden rounded-xl border border-[var(--line)] shadow-[0_10px_40px_-20px_rgba(0,0,0,0.9)]">
+            {promo && (
+              <PromotionPicker
+                side={fen.split(" ")[1] === "b" ? "black" : "white"}
+                onPick={(piece: PromotionPiece) => {
+                  const target = promo;
+                  setPromo(null);
+                  if (target) void answer(target.from, target.to, piece);
+                }}
+                onCancel={() => setPromo(null)}
+              />
+            )}
             <Chessboard
               options={{
                 id: "train-board",
