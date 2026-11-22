@@ -124,14 +124,19 @@ const studies = [
     comments: [
       {
         author: "Coach Ravi",
+        ply: 0,
         body: "The cleanest development lesson ever played: every piece joins the attack, and none of them is defended by a plan you would not teach a beginner.",
       },
       {
         author: "Anna",
+        // 12.O-O-O is White's 12th move, i.e. half-move 23.
+        ply: 23,
         body: "12.O-O-O is the moment I always show students — castling into the open file to bring the last piece into the game.",
       },
       {
         author: "Mikhail",
+        // 16.Qb8+ is half-move 31.
+        ply: 31,
         body: "16.Qb8+ is pure deflection. The knight must take, and then the back rank belongs to White.",
       },
     ],
@@ -152,10 +157,13 @@ const studies = [
     comments: [
       {
         author: "Anna",
+        ply: 0,
         body: "Three sacrifices in the last five moves. Anderssen was down two rooks and a queen and still did not care.",
       },
       {
         author: "Mikhail",
+        // 22.Qf6+ is half-move 43.
+        ply: 43,
         body: "Do not try this at home — but do study 22.Qf6+. The deflection is the whole point.",
       },
     ],
@@ -173,6 +181,7 @@ const studies = [
     comments: [
       {
         author: "Coach Ravi",
+        ply: 0,
         body: "Classic bait: hang the queen, then mate with two minor pieces. Worth knowing both as the trap and as the refutation.",
       },
     ],
@@ -225,8 +234,21 @@ async function main() {
     if (existing) {
       await prisma.study.update({
         where: { id: existing.id },
-        data: { pgn: entry.pgn, subtitle: entry.subtitle, eco: entry.eco },
+        data: {
+          pgn: entry.pgn,
+          subtitle: entry.subtitle,
+          eco: entry.eco,
+          author: "Community",
+        },
       });
+      // Backfill the move each seeded note is about, so an older database
+      // gains the anchored-comment UI instead of showing every note as general.
+      for (const comment of entry.comments) {
+        await prisma.comment.updateMany({
+          where: { studyId: existing.id, author: comment.author, body: comment.body },
+          data: { ply: comment.ply ?? 0 },
+        });
+      }
       insertedStudies += 1;
       continue;
     }
@@ -237,7 +259,14 @@ async function main() {
         subtitle: entry.subtitle,
         eco: entry.eco,
         pgn: entry.pgn,
-        comments: { create: entry.comments },
+        author: "Community",
+        comments: {
+          create: entry.comments.map((comment) => ({
+            author: comment.author,
+            body: comment.body,
+            ply: comment.ply ?? 0,
+          })),
+        },
       },
     });
     void study;
