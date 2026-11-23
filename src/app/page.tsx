@@ -2,6 +2,7 @@ import Link from "next/link";
 import { listStudies } from "@/app/actions";
 import MiniBoard from "@/components/MiniBoard";
 import StaticBoard from "@/components/StaticBoard";
+import LiveTime from "@/components/LiveTime";
 import { getViewer } from "@/lib/auth";
 import { listOpenDuels } from "@/lib/duels";
 import { listOpenTournaments, refreshTournamentCalendar } from "@/lib/tournaments";
@@ -12,14 +13,6 @@ import { getTrainOverview } from "@/app/train/actions";
 
 // Read from the database on every request — never serve a stale cached page.
 export const dynamic = "force-dynamic";
-
-function arenaGap(targetIso: string, now: number) {
-  const minutes = Math.round(Math.abs(new Date(targetIso).getTime() - now) / 60_000);
-  if (minutes < 60) return `${minutes} min`;
-  const hours = Math.floor(minutes / 60);
-  const rest = minutes % 60;
-  return rest ? `${hours}h ${rest}m` : `${hours}h`;
-}
 
 export default async function DashboardPage() {
   // Real Lichess arenas, refreshed at most every ten minutes.
@@ -111,6 +104,7 @@ export default async function DashboardPage() {
       ].map((event) => [event.id, event]),
     ).values(),
   ).slice(0, 4);
+  const now = Date.now();
 
   return (
     <main className="mx-auto max-w-6xl 2xl:max-w-[1440px] px-6 py-14">
@@ -482,7 +476,7 @@ export default async function DashboardPage() {
                         ? "chess.com"
                         : "Club";
                   const elapsed = live
-                    ? ((Date.now() - new Date(tournament.startsAt).getTime()) /
+                    ? ((now - new Date(tournament.startsAt).getTime()) /
                         Math.max(
                           1,
                           new Date(tournament.endsAt).getTime() -
@@ -542,9 +536,11 @@ export default async function DashboardPage() {
                             </>
                           )}
                           <span className="shrink-0">
-                            {live
-                              ? `${arenaGap(tournament.endsAt, Date.now())} left`
-                              : `in ${arenaGap(tournament.startsAt, Date.now())}`}
+                            <LiveTime
+                              start={tournament.startsAt}
+                              end={tournament.endsAt}
+                              initialNow={now}
+                            />
                           </span>
                         </span>
                       </a>

@@ -1,5 +1,7 @@
 import Link from "next/link";
 
+import LiveTime from "@/components/LiveTime";
+
 import { createTournamentAction, refreshCalendarAction } from "@/app/tournaments/actions";
 import { getViewer } from "@/lib/auth";
 import { TIME_CONTROLS } from "@/lib/gameOptions";
@@ -23,22 +25,13 @@ const TABS = [
   { id: "club", label: "Club" },
 ] as const;
 
-function humanGap(targetIso: string, now: number) {
-  const minutes = Math.round(Math.abs(new Date(targetIso).getTime() - now) / 60_000);
-  if (minutes < 60) return `${minutes} min`;
-  const hours = Math.floor(minutes / 60);
-  const rest = minutes % 60;
-  return rest ? `${hours}h ${rest}m` : `${hours}h`;
-}
-
-function humanAgo(targetIso: string, now: number) {
-  const minutes = Math.max(0, Math.round((now - new Date(targetIso).getTime()) / 60_000));
-  if (minutes < 1) return "just now";
-  if (minutes < 60) return `${minutes} minute${minutes === 1 ? "" : "s"} ago`;
-  const hours = Math.floor(minutes / 60);
-  if (hours < 24) return `${hours} hour${hours === 1 ? "" : "s"} ago`;
-  const days = Math.floor(hours / 24);
-  return `${days} day${days === 1 ? "" : "s"} ago`;
+function speedOf(timeControl: string) {
+  const minutes = Number(timeControl.split("+")[0]);
+  if (!Number.isFinite(minutes)) return "classical";
+  if (minutes < 3) return "bullet";
+  if (minutes < 8) return "blitz";
+  if (minutes < 25) return "rapid";
+  return "classical";
 }
 
 function SourceBadge({ source }: { source: string }) {
@@ -66,51 +59,84 @@ function SourceBadge({ source }: { source: string }) {
 export default async function TournamentsPage({
   searchParams,
 }: {
-  searchParams: Promise<{ error?: string; source?: string }>;
+  searchParams: Promise<{ error?: string; source?: string; q?: string; speed?: string }>;
 }) {
-  const { error, source } = await searchParams;
+  const { error, source, q, speed: speedParam } = await searchParams;
   await refreshTournamentCalendar();
   const viewer = await getViewer();
   const [open, recent, finished] = await Promise.all([
     listOpenTournaments(),
     listRecentTournaments(),
-    listFinishedTournaments(12),
+    listFinishedTournaments(40),
   ]);
   const now = Date.now();
 
   const active = TABS.some((tab) => tab.id === source) ? (source ?? "all") : "all";
-  const lichess = open.filter((tournament) => tournament.source === "lichess");
-  const chessCom = open.filter((tournament) => tournament.source === "chess.com");
-  const local = open.filter((tournament) => tournament.source === "local");
+  const query = (q ?? "").trim();
+  const speed = ["bullet", "blitz", "rapid", "classical"].includes(speedParam ?? "")
+    ? (speedParam ?? "all")
+    : "all";
+  const matches = (tournament: { name: string; timeControl: string }) =>
+    (!query || tournament.name.toLowerCase().includes(query.toLowerCase())) &&
+    (speed === "all" || speedOf(tournament.timeControl) === speed);
+
+  const filtered = open.filter(matches);
+  const lichess = filtered.filter((tournament) => tournament.source === "lichess");
+  const chessCom = filtered.filter((tournament) => tournament.source === "chess.com");
+  const local = filtered.filter((tournament) => tournament.source === "local");
 
   const interleaved = [
-    ...lichess.slice(0, 6),
-    ...chessCom.slice(0, 3),
-    ...lichess.slice(6, 10),
-    ...chessCom.slice(3),
+    ...lichess.slice(0, 8),
+    ...chessCom.slice(0, 4),
+    ...lichess.slice(8, 16),
+    ...chessCom.slice(4),
+    ...lichess.slice(16),
   ];
   const externalOpen =
     active === "chess.com"
       ? chessCom
       : active === "lichess"
-        ? lichess.slice(0, 16)
+        ? lichess
         : interleaved;
+  const shown = externalOpen.slice(0, 30);
+  const externalTotal =
+    active === "chess.com"
+      ? chessCom.length
+      : active === "lichess"
+        ? lichess.length
+        : lichess.length + chessCom.length;
 
   const pastEvents =
     active === "club"
       ? []
       : finished
-          .filter((tournament) => active === "all" || tournament.source === active)
+          .filter(
+            (tournament) =>
+              (active === "all" || tournament.source === active) && matches(tournament),
+          )
           .slice(0, 8);
 
   const showExternal = active !== "club";
   const showClub = active === "all" || active === "club";
   const counts: Record<string, number> = {
-    all: lichess.length + chessCom.length,
+    all: filtered.length,
     lichess: lichess.length,
     "chess.com": chessCom.length,
     club: local.length,
   };
+
+  const filtersHref = (next: { source?: string; speed?: string; q?: string }) => {
+    const params = new URLSearchParams();
+    const nextSource = next.source ?? (active === "all" ? "" : active);
+    const nextSpeed = next.speed ?? (speed === "all" ? "" : speed);
+    const nextQuery = next.q ?? query;
+    if (nextSource) params.set("source", nextSource);
+    if (nextSpeed) params.set("speed", nextSpeed);
+    if (nextQuery) params.set("q", nextQuery);
+    const search = params.toString();
+    return search ? `/tournaments?${search}` : "/tournaments";
+  };
+  const tabHref = (id: string) => filtersHref({ source: id === "all" ? "" : id });
 
   return (
     <main className="mx-auto w-full max-w-6xl 2xl:max-w-[1440px] px-4 py-8 sm:px-6">
@@ -160,7 +186,7 @@ export default async function TournamentsPage({
           return (
             <Link
               key={tab.id}
-              href={tab.id === "all" ? "/tournaments" : `/tournaments?source=${tab.id}`}
+              href={tabHref(tab.id)}
               className={`rounded-md px-2.5 py-1.5 text-[11.5px] transition ${
                 isActive
                   ? "bg-[var(--panel)] font-medium text-[var(--text)] shadow-[inset_0_-2px_0_var(--accent)]"
@@ -174,7 +200,68 @@ export default async function TournamentsPage({
         })}
       </nav>
 
-      {showExternal && (
+            <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-2">
+        <form
+          method="get"
+          action="/tournaments"
+          className="flex min-w-[230px] flex-1 flex-wrap items-center gap-2"
+        >
+          {active !== "all" && <input type="hidden" name="source" value={active} />}
+          {speed !== "all" && <input type="hidden" name="speed" value={speed} />}
+          <div className="relative min-w-[210px] flex-1">
+            <input
+              name="q"
+              defaultValue={query}
+              placeholder="Search events — Sicilian, Blitz, club…"
+              className="w-full rounded-md border border-[var(--line)] bg-[var(--panel)] py-1.5 pl-3 pr-16 text-[12px] outline-none transition focus:border-[var(--accent)]"
+            />
+            <button
+              type="submit"
+              className="absolute right-1 top-1/2 -translate-y-1/2 rounded-sm bg-[var(--panel-2)] px-2 py-0.5 text-[10px] text-[var(--muted)] transition hover:text-[var(--text)]"
+            >
+              Search
+            </button>
+          </div>
+          {query && (
+            <Link
+              href={filtersHref({ q: "" })}
+              className="text-[10.5px] text-[var(--muted)] underline hover:text-[var(--text)]"
+            >
+              Clear
+            </Link>
+          )}
+        </form>
+
+        <div className="flex flex-wrap items-center gap-1">
+          <span className="mr-1 text-[10px] uppercase tracking-wider text-[var(--muted)]">
+            Speed
+          </span>
+          {[
+            ["all", "Any"],
+            ["bullet", "Bullet"],
+            ["blitz", "Blitz"],
+            ["rapid", "Rapid"],
+            ["classical", "Classical"],
+          ].map(([id, label]) => {
+            const isActive = speed === id;
+            return (
+              <Link
+                key={id}
+                href={filtersHref({ speed: id === "all" ? "" : id })}
+                className={`rounded-sm px-2 py-1 text-[10.5px] transition ${
+                  isActive
+                    ? "bg-[var(--accent)]/15 font-medium text-[var(--accent)]"
+                    : "text-[var(--muted)] hover:bg-[var(--panel-2)] hover:text-[var(--text)]"
+                }`}
+              >
+                {label}
+              </Link>
+            );
+          })}
+        </div>
+      </div>
+
+{showExternal && (
         <section className="mt-4 overflow-hidden rounded-lg border border-[var(--line)] bg-[var(--panel)]">
           <div className="flex items-baseline justify-between border-b border-[var(--line)] px-4 py-2.5">
             <h2 className="text-[13px] font-semibold">
@@ -185,16 +272,19 @@ export default async function TournamentsPage({
                   : "Live and upcoming"}
             </h2>
             <span className="text-[10px] uppercase tracking-wider text-[var(--muted)]">
-              {externalOpen.length} listed
+              {shown.length}
+              {shown.length < externalTotal ? ` of ${externalTotal}` : ""} listed
             </span>
           </div>
-          {externalOpen.length === 0 ? (
+          {shown.length === 0 ? (
             <p className="px-4 py-6 text-[12px] text-[var(--muted)]">
-              No imported events right now. Hit “Refresh imports”, or check back in a minute.
+              {query || speed !== "all"
+                ? "No events match those filters."
+                : "No imported events right now. Hit “Refresh imports”, or check back in a minute."}
             </p>
           ) : (
             <ul className="divide-y divide-[var(--line)]">
-              {externalOpen.map((tournament) => {
+              {shown.map((tournament) => {
                 const live = tournament.status === "live";
                 return (
                   <li key={tournament.id}>
@@ -222,9 +312,11 @@ export default async function TournamentsPage({
                         </span>
                         <span className="mt-0.5 block text-[10.5px] text-[var(--muted)]">
                           {tournament.timeControl.replace("+", " + ")} ·{" "}
-                          {live
-                            ? `${humanGap(tournament.endsAt, now)} remaining`
-                            : `starts in ${humanGap(tournament.startsAt, now)}`}
+                          <LiveTime
+                            start={tournament.startsAt}
+                            end={tournament.endsAt}
+                            initialNow={now}
+                          />
                           {" · "}
                           {tournament.players > 0
                             ? `${tournament.players} player${tournament.players === 1 ? "" : "s"}`
@@ -289,9 +381,11 @@ export default async function TournamentsPage({
                         </span>
                         <span className="mt-0.5 block text-[10.5px] text-[var(--muted)]">
                           {tournament.timeControl.replace("+", " + ")} ·{" "}
-                          {live
-                            ? `${humanGap(tournament.endsAt, now)} remaining`
-                            : `starts in ${humanGap(tournament.startsAt, now)}`}
+                          <LiveTime
+                            start={tournament.startsAt}
+                            end={tournament.endsAt}
+                            initialNow={now}
+                          />
                           {" · "}
                           {tournament.players} player{tournament.players === 1 ? "" : "s"}
                         </span>
@@ -410,7 +504,12 @@ export default async function TournamentsPage({
                   <span className="min-w-0 flex-1 truncate">{tournament.name}</span>
                   <span className="shrink-0 text-[10.5px] text-[var(--muted)]">
                     {tournament.players} player{tournament.players === 1 ? "" : "s"} ·{" "}
-                    {humanAgo(tournament.endsAt, now)}
+                    <LiveTime
+                      start={tournament.startsAt}
+                      end={tournament.endsAt}
+                      initialNow={now}
+                      mode="ago"
+                    />
                   </span>
                 </a>
               </li>

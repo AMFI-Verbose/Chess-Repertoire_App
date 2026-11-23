@@ -1,4 +1,6 @@
 import Link from "next/link";
+
+import LiveTime from "@/components/LiveTime";
 import { notFound } from "next/navigation";
 
 import {
@@ -16,16 +18,6 @@ export async function generateMetadata({ params }: { params: Promise<{ id: strin
   const { id } = await params;
   const tournament = await getTournament(id);
   return { title: tournament ? `${tournament.name} · Arena` : "Arena" };
-}
-
-function countdown(targetIso: string, now: number) {
-  const minutes = Math.max(0, Math.round((new Date(targetIso).getTime() - now) / 60_000));
-  if (minutes >= 60) {
-    const hours = Math.floor(minutes / 60);
-    const rest = minutes % 60;
-    return rest ? `${hours}h ${rest}m` : `${hours}h`;
-  }
-  return `${minutes} min`;
 }
 
 export default async function TournamentPage({
@@ -58,9 +50,6 @@ export default async function TournamentPage({
   ]);
 
   const now = Date.now();
-  const startsIn = countdown(tournament.startsAt, now);
-  const endsIn = countdown(tournament.endsAt, now);
-  const live = tournament.status === "live";
   const finished = tournament.status === "finished";
   const canLeave = tournament.status === "upcoming";
 
@@ -78,11 +67,11 @@ export default async function TournamentPage({
           <h1 className="mt-1 text-[28px] font-semibold tracking-tight">{tournament.name}</h1>
           <p className="mt-1 text-[12px] text-[var(--muted)]">
             {tournament.players} player{tournament.players === 1 ? "" : "s"} ·{" "}
-            {live
-              ? `${endsIn} remaining`
-              : finished
-                ? "Finished"
-                : `starts in ${startsIn}`}
+            <LiveTime
+              start={tournament.startsAt}
+              end={tournament.endsAt}
+              initialNow={now}
+            />
             {" · "}wins 2, draws 1
           </p>
         </div>
