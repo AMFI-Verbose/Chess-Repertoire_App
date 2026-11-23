@@ -51,6 +51,7 @@ export default function PuzzleTrainer({
   const [puzzle, setPuzzle] = useState(initial);
   const [stats, setStats] = useState(initialStats);
   const [daily, setDaily] = useState(isDaily);
+  const [ratingMode, setRatingMode] = useState<"rated" | "practice">("rated");
   const [theme, setTheme] = useState<string>(initialTheme ?? "");
   const [status, setStatus] = useState<Status>("solving");
   const [position, setPosition] = useState(initial.fen);
@@ -74,9 +75,15 @@ export default function PuzzleTrainer({
     async (solved: boolean) => {
       if (reported.current) return;
       reported.current = true;
+      // Practice is deliberately local: no attempt row, no rating point.
+      if (ratingMode === "practice") return;
       // A failed write should never take the page down mid-drag.
       try {
-        const next = await submitPuzzleAttempt({ puzzleId: puzzle.id, solved });
+        const next = await submitPuzzleAttempt({
+          puzzleId: puzzle.id,
+          solved,
+          rated: true,
+        });
         setStats(next);
         setDelta(next.lastDelta);
         window.setTimeout(() => setDelta(null), 5000);
@@ -84,7 +91,7 @@ export default function PuzzleTrainer({
         reported.current = false;
       }
     },
-    [puzzle.id],
+    [puzzle.id, ratingMode],
   );
 
   /** Play one UCI move on the ref board and mirror it into state. */
@@ -255,6 +262,7 @@ export default function PuzzleTrainer({
 
   function reveal() {
     if (status === "solved" || status === "revealed") return;
+    const wasSolving = status === "solving";
     cancelTimers();
     setStatus("revealed");
     let index = step;
@@ -271,7 +279,7 @@ export default function PuzzleTrainer({
       setStep(index);
     }, 420);
     timers.current.push(timer);
-    if (status === "solving") void record(false);
+    if (wasSolving) void record(false);
   }
 
   /** Switching theme fetches a puzzle from it straight away. */
@@ -334,7 +342,40 @@ export default function PuzzleTrainer({
   const themes = puzzle.themes.split(" ").filter(Boolean).slice(0, 4);
 
   return (
-    <div className="grid gap-8 lg:grid-cols-[minmax(0,1fr)_320px]">
+    <div>
+      <div className="mb-6 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-[var(--line)] bg-[var(--panel)] px-4 py-3">
+        <div className="flex items-center gap-3">
+          <span className="text-[11px] uppercase tracking-wider text-[var(--muted)]">
+            Puzzle mode
+          </span>
+          <div className="inline-flex overflow-hidden rounded-lg border border-[var(--line)]">
+            {(["rated", "practice"] as const).map((mode) => (
+              <button
+                key={mode}
+                aria-pressed={ratingMode === mode}
+                onClick={() => {
+                  setRatingMode(mode);
+                  setDelta(null);
+                }}
+                className={`px-3 py-1.5 text-xs font-medium capitalize ${
+                  ratingMode === mode
+                    ? "bg-[var(--accent)] text-white"
+                    : "text-[var(--muted)] hover:bg-[var(--panel-2)] hover:text-[var(--text)]"
+                }`}
+              >
+                {mode}
+              </button>
+            ))}
+          </div>
+        </div>
+        <p className="text-xs text-[var(--muted)]">
+          {ratingMode === "rated"
+            ? "Rated solves move your puzzle Elo."
+            : "Practice solves never change your rating or history."}
+        </p>
+      </div>
+
+      <div className="grid gap-8 lg:grid-cols-[minmax(0,1fr)_320px]">
       <section className="flex flex-col items-center gap-3">
         <div
           className={`relative w-full max-w-[600px] ${shaking ? "animate-shake" : ""}`}
@@ -384,7 +425,9 @@ export default function PuzzleTrainer({
 
           {status === "solved" && (
             <div className="animate-pop pointer-events-none absolute left-1/2 top-4 -translate-x-1/2 rounded-lg bg-[#26c2a3] px-4 py-2 text-sm font-semibold text-white shadow-lg">
-              Solved · {puzzle.rating} rating
+              {ratingMode === "practice"
+                ? "Solved · Practice — rating unchanged"
+                : `Solved · ${puzzle.rating} rating`}
             </div>
           )}
           {status === "failed" && (
@@ -396,9 +439,13 @@ export default function PuzzleTrainer({
 
         <p className="h-5 text-xs text-[var(--muted)]">
           {status === "solved"
-            ? "Clean finish. Next one?"
+            ? ratingMode === "practice"
+              ? "Practice solve — nothing was written to your rating."
+              : "Clean finish. Next one?"
             : status === "revealed"
-              ? "Solution shown — this attempt counts as unsolved."
+              ? ratingMode === "practice"
+                ? "Solution shown — practice only, no rating change."
+                : "Solution shown — this attempt counts as unsolved."
               : status === "failed"
                 ? "You can reset and retry, or reveal the line."
                 : turn === (solverPlays === "white" ? "w" : "b")
@@ -448,6 +495,11 @@ export default function PuzzleTrainer({
             <span className="text-[11px] uppercase tracking-[0.16em] text-[var(--muted)]">
               Your puzzle rating
             </span>
+            {ratingMode === "practice" && (
+              <span className="rounded bg-[var(--panel-2)] px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-[var(--muted)]">
+                Practice
+              </span>
+            )}
             {delta !== null && delta !== 0 && (
               <span
                 className={`animate-pop rounded px-1.5 py-0.5 text-xs font-semibold ${
@@ -489,8 +541,9 @@ export default function PuzzleTrainer({
               />
             </div>
             <p className="mt-2 text-[11px] leading-relaxed text-[var(--muted)]">
-              Elo updates after every attempt: beating a puzzle rated above you
-              pays more than beating an easy one.
+              {ratingMode === "practice"
+                ? "Practice mode: the board, feedback and themes still work, but this rating stays put."
+                : "Elo updates after every attempt: beating a puzzle rated above you pays more than beating an easy one."}
             </p>
           </div>
         </div>
@@ -582,6 +635,7 @@ export default function PuzzleTrainer({
           </span>
         </Link>
       </aside>
+      </div>
     </div>
   );
 }

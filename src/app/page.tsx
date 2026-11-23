@@ -7,6 +7,7 @@ import { getViewer } from "@/lib/auth";
 import { listOpenDuels } from "@/lib/duels";
 import { ensureClubArenas, listOpenTournaments, refreshTournamentCalendar } from "@/lib/tournaments";
 import { mistakeStats } from "@/lib/mistakes";
+import { getPlayerRating } from "@/lib/player-ratings";
 import { prisma } from "@/lib/prisma";
 import { createRepertoire } from "./actions";
 import { opponentLabel } from "@/lib/bots";
@@ -20,6 +21,7 @@ export default async function DashboardPage() {
   // every ten minutes; the club schedule fills itself.
   await Promise.all([refreshTournamentCalendar(), ensureClubArenas()]);
   const viewer = await getViewer();
+  const viewerPuzzleRating = viewer ? await getPlayerRating(viewer.id, "puzzle") : null;
   const train = await getTrainOverview();
   const trainDue = train.reduce((sum, item) => sum + item.due + item.fresh, 0);
 
@@ -45,16 +47,20 @@ export default async function DashboardPage() {
         include: { _count: { select: { nodes: true } } },
       }),
       prisma.opening.count(),
-      prisma.puzzleAttempt.count({ where: { solved: true } }),
+      prisma.puzzleAttempt.count({
+        where: viewer ? { userId: viewer.id, solved: true } : { userId: null, solved: true },
+      }),
       prisma.study.count(),
       prisma.puzzleAttempt.findMany({
+        where: viewer ? { userId: viewer.id } : { userId: null },
         orderBy: { createdAt: "desc" },
         take: 50,
         select: { solved: true },
       }),
       prisma.profile.findUnique({ where: { id: "local" } }),
-      prisma.game.count(),
+      prisma.game.count({ where: viewer ? { userId: viewer.id } : { userId: null } }),
       prisma.game.findMany({
+        where: viewer ? { userId: viewer.id } : { userId: null },
         orderBy: { createdAt: "desc" },
         take: 3,
         select: {
@@ -90,7 +96,10 @@ export default async function DashboardPage() {
 
   const stats = [
     { label: "Repertoires", value: repertoires.length },
-    { label: "Puzzle rating", value: profile?.puzzleRating ?? 1500 },
+    {
+      label: "Puzzle rating",
+      value: viewerPuzzleRating?.rating ?? profile?.puzzleRating ?? 1500,
+    },
     { label: "Puzzles solved", value: solvedPuzzles },
     { label: "Games played", value: gameCount },
   ];

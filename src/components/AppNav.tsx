@@ -17,6 +17,7 @@ const PRIMARY = [
 const MORE = [
   { href: "/openings", label: "Openings" },
   { href: "/games", label: "Games" },
+  { href: "/players", label: "Players" },
   { href: "/community", label: "Community" },
   { href: "/tournaments", label: "Tournaments" },
 ];
@@ -156,9 +157,9 @@ export default function AppNav({
           {user ? (
             <div className="flex items-center gap-1">
               <Link
-                href="/community"
+                href={`/player/${user.handle}`}
                 className="rounded-md px-2 py-1.5 text-xs font-medium text-[var(--accent)]"
-                title={`Signed in as ${user.handle}`}
+                title={`Open @${user.handle}'s profile`}
               >
                 @{user.handle}
                 {!user.emailVerified && (

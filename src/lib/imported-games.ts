@@ -12,6 +12,8 @@ export type ImportedGameInput = {
   externalUrl?: string;
   /** When the game was actually played, not when it was imported. */
   playedAt?: Date;
+  /** The account that imported it, so it appears on their public profile. */
+  userId?: string | null;
 };
 
 export type StoredGame = { id: string; created: boolean };
@@ -88,6 +90,7 @@ export async function storeImportedGame(input: ImportedGameInput): Promise<Store
   const created = await prisma.game.create({
     data: {
       kind: "import",
+      userId: input.userId ?? null,
       playerColor: color,
       result: outcome,
       resultText: `${white} vs ${black} · ${resultHeader}`.slice(0, 120),

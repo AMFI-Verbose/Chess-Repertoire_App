@@ -2,6 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 
+import { getViewer } from "@/lib/auth";
 import { sideOfPgn, storeImportedGame } from "@/lib/imported-games";
 
 export type PlatformImportResult = {
@@ -46,6 +47,7 @@ export async function importLichessGames(
 ): Promise<PlatformImportResult> {
   const username = safeUsername(rawUsername);
   const limit = clampLimit(rawLimit);
+  const viewer = await getViewer();
 
   const url = `https://lichess.org/api/games/user/${encodeURIComponent(
     username,
@@ -111,6 +113,7 @@ export async function importLichessGames(
         externalId: `lichess:${game.id}`,
         externalUrl: `https://lichess.org/${game.id}`,
         playedAt: game.createdAt ? new Date(game.createdAt) : undefined,
+        userId: viewer?.id ?? null,
       });
       if (stored.created) {
         imported += 1;
@@ -125,6 +128,10 @@ export async function importLichessGames(
 
   revalidatePath("/games");
   revalidatePath("/");
+  if (viewer) {
+    revalidatePath(`/player/${viewer.handle}`);
+    revalidatePath("/players");
+  }
   return {
     platform: "Lichess",
     imported,
@@ -145,6 +152,7 @@ export async function importChessComGames(
 ): Promise<PlatformImportResult> {
   const username = safeUsername(rawUsername).toLowerCase();
   const limit = clampLimit(rawLimit);
+  const viewer = await getViewer();
 
   const headers = { "User-Agent": USER_AGENT, Accept: "application/json" };
   let archiveResponse: Response;
@@ -221,6 +229,7 @@ export async function importChessComGames(
         externalId: `chesscom:${game.uuid}`,
         externalUrl: game.url,
         playedAt: game.end_time ? new Date(game.end_time * 1000) : undefined,
+        userId: viewer?.id ?? null,
       });
       if (stored.created) {
         imported += 1;
@@ -235,6 +244,10 @@ export async function importChessComGames(
 
   revalidatePath("/games");
   revalidatePath("/");
+  if (viewer) {
+    revalidatePath(`/player/${viewer.handle}`);
+    revalidatePath("/players");
+  }
   return {
     platform: "chess.com",
     imported,
