@@ -41,7 +41,7 @@ export default async function CommunityPage() {
   ];
 
   return (
-    <main className="mx-auto max-w-6xl px-4 py-7 sm:px-6 lg:py-9">
+    <main className="mx-auto max-w-6xl 2xl:max-w-[1440px] px-4 py-7 sm:px-6 lg:py-9">
       <header>
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div>

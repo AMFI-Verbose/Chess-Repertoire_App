@@ -33,7 +33,7 @@ export default async function TrainPage() {
     .sort((a, b) => b.due - a.due)[0];
 
   return (
-    <main className="mx-auto w-full max-w-5xl px-6 py-10">
+    <main className="mx-auto w-full max-w-6xl 2xl:max-w-[1440px] px-6 py-10">
       <header className="mb-6">
         <p className="text-[11px] uppercase tracking-[0.2em] text-[var(--accent)]">
           repertoire trainer

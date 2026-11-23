@@ -28,7 +28,7 @@ export default async function SupportPage({
   const perMonth = (monthly._sum.amountCents ?? 0) / 100;
 
   return (
-    <main className="mx-auto w-full max-w-5xl px-4 py-8 sm:px-6">
+    <main className="mx-auto w-full max-w-6xl 2xl:max-w-[1440px] px-4 py-8 sm:px-6">
       <Link href="/" className="text-[11px] text-[var(--muted)] hover:text-[var(--text)]">
         ← Home
       </Link>

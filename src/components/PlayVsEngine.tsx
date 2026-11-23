@@ -625,7 +625,7 @@ export default function PlayVsEngine({
   const Shell = embedded ? "div" : "main";
 
   return (
-    <Shell className={embedded ? "w-full" : "mx-auto w-full max-w-6xl px-6 py-8"}>
+    <Shell className={embedded ? "w-full" : "mx-auto w-full max-w-6xl 2xl:max-w-[1440px] px-6 py-8"}>
       {!embedded && (
       <header className="mb-6 flex flex-wrap items-end justify-between gap-4">
         <div>

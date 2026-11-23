@@ -100,7 +100,7 @@ export default function PlayHub({
   ];
 
   return (
-    <main className="mx-auto w-full max-w-6xl px-4 py-6 sm:px-6">
+    <main className="mx-auto w-full max-w-6xl 2xl:max-w-[1440px] px-4 py-6 sm:px-6">
       <header className="flex flex-wrap items-end justify-between gap-3">
         <div>
           <Link href="/" className="text-[11px] text-[var(--muted)] hover:text-[var(--text)]">

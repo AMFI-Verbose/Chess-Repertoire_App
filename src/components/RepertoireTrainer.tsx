@@ -236,7 +236,7 @@ export default function RepertoireTrainer({
   const stepPercent = Math.round((index / total) * 100);
 
   return (
-    <main className="mx-auto w-full max-w-5xl px-6 py-8">
+    <main className="mx-auto w-full max-w-6xl 2xl:max-w-[1440px] px-6 py-8">
       <header className="mb-5">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div className="flex items-center gap-2 text-xs text-[var(--muted)]">
