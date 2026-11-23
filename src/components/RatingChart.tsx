@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 export type RatingSeries = {
   category: string;
@@ -9,7 +9,7 @@ export type RatingSeries = {
   points: { t: number; rating: number }[];
 };
 
-const W = 760;
+const WIDE_W = 760;
 const H = 276;
 const PAD = { left: 50, right: 18, top: 18, bottom: 30 };
 const RANGES = [
@@ -38,6 +38,21 @@ export default function RatingChart({ series }: { series: RatingSeries[] }) {
   const [months, setMonths] = useState<1 | 3 | 12>(1);
   const [hidden, setHidden] = useState<string[]>([]);
   const [hover, setHover] = useState<{ t: number; x: number } | null>(null);
+  const [chartWidth, setChartWidth] = useState(WIDE_W);
+
+  useEffect(() => {
+    const update = () => {
+      const width = window.innerWidth;
+      setChartWidth(width <= 640 ? 430 : width <= 900 ? 600 : WIDE_W);
+    };
+    update();
+    window.addEventListener("resize", update);
+    return () => window.removeEventListener("resize", update);
+  }, []);
+
+  // A phone gets a taller viewBox so the axis labels stay legible instead of
+  // being scaled down with the full desktop chart.
+  const W = chartWidth;
 
   const now = Date.now();
   const start = now - months * 30.44 * 86400000;
@@ -97,13 +112,26 @@ export default function RatingChart({ series }: { series: RatingSeries[] }) {
     ? prepared
         .map((entry) => {
           let point: { t: number; rating: number } | null = null;
-          for (const candidate of entry.points) {
-            if (candidate.t <= hover.t) point = candidate;
-            else break;
+          let pointIndex = 0;
+          for (let index = 0; index < entry.points.length; index += 1) {
+            const candidate = entry.points[index];
+            if (candidate.t <= hover.t) {
+              point = candidate;
+              pointIndex = index;
+            } else {
+              break;
+            }
           }
-          return point ? { ...entry, point } : null;
+          return point ? { ...entry, point, pointIndex } : null;
         })
-        .filter((entry): entry is RatingSeries & { point: { t: number; rating: number } } => entry !== null)
+        .filter(
+          (
+            entry,
+          ): entry is RatingSeries & {
+            point: { t: number; rating: number };
+            pointIndex: number;
+          } => entry !== null,
+        )
     : [];
 
   function onMove(event: React.PointerEvent<SVGSVGElement>) {
@@ -120,7 +148,7 @@ export default function RatingChart({ series }: { series: RatingSeries[] }) {
         <div>
           <h2 className="text-sm font-semibold">Rating history</h2>
           <p className="mt-0.5 text-[11px] text-[var(--muted)]">
-            One line per time control. Click a label to hide it.
+            Move across the graph to inspect points. Click a label to hide its line.
           </p>
         </div>
         <div className="inline-flex overflow-hidden rounded-lg border border-[var(--line)]">
@@ -149,7 +177,7 @@ export default function RatingChart({ series }: { series: RatingSeries[] }) {
         ) : (
           <svg
             viewBox={`0 0 ${W} ${H}`}
-            className="w-full touch-none"
+            className="w-full touch-none cursor-crosshair"
             onPointerMove={onMove}
             onPointerLeave={() => setHover(null)}
             role="img"
@@ -194,6 +222,7 @@ export default function RatingChart({ series }: { series: RatingSeries[] }) {
               const path = entry.points
                 .map((point, index) => `${index === 0 ? "M" : "L"} ${x(point.t).toFixed(1)} ${y(point.rating).toFixed(1)}`)
                 .join(" ");
+              const last = entry.points[entry.points.length - 1];
               return (
                 <g key={entry.category}>
                   <path
@@ -204,9 +233,14 @@ export default function RatingChart({ series }: { series: RatingSeries[] }) {
                     strokeLinecap="round"
                     strokeLinejoin="round"
                   />
-                  {entry.points.length === 1 && (
-                    <circle cx={x(entry.points[0].t)} cy={y(entry.points[0].rating)} r={3.5} fill={entry.color} />
-                  )}
+                  <circle
+                    cx={x(last.t)}
+                    cy={y(last.rating)}
+                    r={3.2}
+                    fill={entry.color}
+                    stroke="var(--panel)"
+                    strokeWidth={1.5}
+                  />
                 </g>
               );
             })}
@@ -228,10 +262,10 @@ export default function RatingChart({ series }: { series: RatingSeries[] }) {
                     key={entry.category}
                     cx={x(entry.point.t)}
                     cy={y(entry.point.rating)}
-                    r={3.5}
+                    r={4.2}
                     fill={entry.color}
                     stroke="var(--panel)"
-                    strokeWidth={1.5}
+                    strokeWidth={2}
                   />
                 ))}
               </>
@@ -252,13 +286,41 @@ export default function RatingChart({ series }: { series: RatingSeries[] }) {
             {hoverValues
               .slice()
               .sort((a, b) => b.point.rating - a.point.rating)
-              .map((entry) => (
-                <p key={entry.category} className="flex items-center gap-2 text-[11px]">
-                  <span className="h-1.5 w-1.5 rounded-full" style={{ background: entry.color }} />
-                  <span className="flex-1 text-[var(--muted)]">{valueLabel(entry.category)}</span>
-                  <span className="font-medium tabular-nums">{entry.point.rating}</span>
-                </p>
-              ))}
+              .map((entry) => {
+                const previous =
+                  entry.pointIndex > 0
+                    ? entry.points[entry.pointIndex - 1]
+                    : null;
+                const delta = previous
+                  ? entry.point.rating - previous.rating
+                  : null;
+                return (
+                  <p
+                    key={entry.category}
+                    className="flex items-center gap-2 text-[11px]"
+                  >
+                    <span
+                      className="h-1.5 w-1.5 rounded-full"
+                      style={{ background: entry.color }}
+                    />
+                    <span className="flex-1 text-[var(--muted)]">
+                      {valueLabel(entry.category)}
+                    </span>
+                    {delta !== null && delta !== 0 && (
+                      <span
+                        className="font-mono text-[10px]"
+                        style={{ color: delta > 0 ? "#4d7d1c" : "#a13830" }}
+                      >
+                        {delta > 0 ? "+" : "−"}
+                        {Math.abs(delta)}
+                      </span>
+                    )}
+                    <span className="font-medium tabular-nums">
+                      {entry.point.rating}
+                    </span>
+                  </p>
+                );
+              })}
           </div>
         )}
       </div>
