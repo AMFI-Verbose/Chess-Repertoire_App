@@ -17,6 +17,7 @@ import {
 } from "@/lib/classify";
 import { saveGameAnalysis } from "@/app/actions";
 import { START_FEN, turnOf, turnAtPly } from "@/lib/chess";
+import { hintStyles } from "@/lib/boardHints";
 import {
   DARK_SQUARE,
   LIGHT_SQUARE,
@@ -24,8 +25,30 @@ import {
   squaresOf,
 } from "@/lib/boardTheme";
 import { play, type SoundName } from "@/lib/sound";
+import PromotionPicker, { type PromotionPiece } from "@/components/PromotionPicker";
 
 export type ReviewMove = { san: string; uci: string; fen: string; ply: number };
+
+/** A node in a local analysis tree. The original game is never overwritten. */
+type AnalysisNode = {
+  id: string;
+  parentId: string;
+  san: string;
+  uci: string;
+  fen: string;
+  /** Absolute ply in the original game, used for move numbers. */
+  ply: number;
+};
+
+type MistakeMoment = {
+  index: number;
+  move: ReviewMove;
+  label: MoveLabel;
+  mover: "w" | "b";
+  before: number | null;
+  after: number | null;
+  loss: number;
+};
 
 /** Bump when grading rules change: old stored reviews then re-run. */
 const ANALYSIS_VERSION = 4;
@@ -129,6 +152,23 @@ export default function ReviewSequence({
   /** The engine's own choice for each move — what "better" should have been. */
   const [bestUci, setBestUci] = useState<(string | null)[]>([]);
 
+  // ---- free analysis ------------------------------------------------------
+  // Analysis is deliberately client-side and local: exploring a finished game
+  // must never rewrite the PGN, and a reload should still show the real game.
+  const [mode, setMode] = useState<"review" | "analyse">("review");
+  const [analysisRootPly, setAnalysisRootPly] = useState(0);
+  const [analysisNodes, setAnalysisNodes] = useState<Record<string, AnalysisNode>>({});
+  const [currentNodeId, setCurrentNodeId] = useState("root");
+  const [analysisSelected, setAnalysisSelected] = useState<string | null>(null);
+  const [promotion, setPromotion] = useState<{ from: string; to: string } | null>(null);
+  const [engineEnabled, setEngineEnabled] = useState(true);
+  const [engineResult, setEngineResult] = useState<EngineResult | null>(null);
+  const [engineThinking, setEngineThinking] = useState(false);
+  const [mistakeSide, setMistakeSide] = useState<"both" | "w" | "b">("both");
+  const analysisSequence = useRef(0);
+  const analysisEngineRef = useRef<Engine | null>(null);
+  const analysisSearchId = useRef(0);
+
   const engineRef = useRef<Engine | null>(null);
 
   // Position 0 is the start; position i+1 is after move i.
@@ -136,6 +176,40 @@ export default function ReviewSequence({
     () => [startFen, ...moves.map((m) => m.fen)],
     [moves, startFen],
   );
+
+  const currentNode =
+    currentNodeId === "root" ? null : (analysisNodes[currentNodeId] ?? null);
+  const analysisFen =
+    mode === "analyse"
+      ? currentNode?.fen ?? positions[analysisRootPly] ?? startFen
+      : positions[at] || positions[0] || startFen;
+
+  /** Root → current node. This is the line the analysis board is showing. */
+  const analysisLine = useMemo(() => {
+    const line: AnalysisNode[] = [];
+    let id = currentNodeId;
+    const seen = new Set<string>();
+    while (id !== "root" && !seen.has(id)) {
+      seen.add(id);
+      const node = analysisNodes[id];
+      if (!node) break;
+      line.unshift(node);
+      id = node.parentId;
+    }
+    return line;
+  }, [analysisNodes, currentNodeId]);
+
+  const analysisChildren = useMemo(
+    () =>
+      Object.values(analysisNodes).filter((node) => node.parentId === currentNodeId),
+    [analysisNodes, currentNodeId],
+  );
+
+  /** Every stored move that is not already on the current line. */
+  const analysisBranches = useMemo(() => {
+    const onPath = new Set(analysisLine.map((node) => node.id));
+    return Object.values(analysisNodes).filter((node) => !onPath.has(node.id));
+  }, [analysisNodes, analysisLine]);
 
   // ---- analysis ----------------------------------------------------------
   // A review that was already computed is restored verbatim: same grades,
@@ -354,9 +428,187 @@ export default function ReviewSequence({
     };
   }, [moves, positions, startFen, bookPlies, gameId, storedAnalysis]);
 
+  // ---- live engine for free analysis -------------------------------------
+  // Debounced: moving through a variation quickly should not queue ten 500 ms
+  // searches. A stale answer is discarded by the request id.
+  useEffect(() => {
+    if (mode !== "analyse" || !engineEnabled) {
+      analysisSearchId.current += 1;
+      analysisEngineRef.current?.terminate();
+      analysisEngineRef.current = null;
+      setEngineResult(null);
+      setEngineThinking(false);
+      return;
+    }
+
+    const engine = analysisEngineRef.current ?? new Engine();
+    analysisEngineRef.current = engine;
+    const requestId = ++analysisSearchId.current;
+    let disposed = false;
+
+    const timer = setTimeout(() => {
+      setEngineThinking(true);
+      setEngineResult(null);
+      engine
+        .search(analysisFen, { movetime: 500, multiPv: 3, skill: 20 })
+        .then((result) => {
+          if (disposed || requestId !== analysisSearchId.current) return;
+          setEngineResult(result);
+          setEngineThinking(false);
+        })
+        .catch(() => {
+          if (disposed || requestId !== analysisSearchId.current) return;
+          setEngineThinking(false);
+        });
+    }, 220);
+
+    return () => {
+      disposed = true;
+      clearTimeout(timer);
+      analysisSearchId.current += 1;
+    };
+  }, [analysisFen, engineEnabled, mode]);
+
+  useEffect(
+    () => () => {
+      analysisSearchId.current += 1;
+      analysisEngineRef.current?.terminate();
+      analysisEngineRef.current = null;
+    },
+    [],
+  );
+
+  // ---- analysis tree controls --------------------------------------------
+  const leaveAnalysis = useCallback(() => {
+    setMode("review");
+    setAnalysisSelected(null);
+    setPromotion(null);
+  }, []);
+
+  const openAnalysis = useCallback(() => {
+    if (analysisRootPly !== at) {
+      setAnalysisRootPly(at);
+      setAnalysisNodes({});
+      setCurrentNodeId("root");
+    }
+    setAutoPlay(false);
+    setAnalysisSelected(null);
+    setPromotion(null);
+    setMode("analyse");
+  }, [analysisRootPly, at]);
+
+  const analysisUndo = useCallback(() => {
+    if (currentNodeId === "root") return;
+    setCurrentNodeId(analysisNodes[currentNodeId]?.parentId ?? "root");
+    setAnalysisSelected(null);
+    setPromotion(null);
+  }, [analysisNodes, currentNodeId]);
+
+  const analysisRedo = useCallback(() => {
+    const next = analysisChildren[0];
+    if (!next) return;
+    setCurrentNodeId(next.id);
+    setAnalysisSelected(null);
+    setPromotion(null);
+  }, [analysisChildren]);
+
+  function needsAnalysisPromotion(from: string, to: string): boolean {
+    const board = new Chess(analysisFen);
+    const piece = board.get(from as never);
+    if (!piece || piece.type !== "p") return false;
+    return to[1] === "8" || to[1] === "1";
+  }
+
+  function commitAnalysisMove(
+    from: string,
+    to: string,
+    promote?: PromotionPiece,
+  ): boolean {
+    const board = new Chess(analysisFen);
+    let move;
+    try {
+      move = board.move({
+        from,
+        to,
+        promotion: promote ?? undefined,
+      });
+    } catch {
+      play("error");
+      return false;
+    }
+
+    const uci = `${move.from}${move.to}${move.promotion ?? ""}`;
+    const existing = analysisChildren.find((node) => node.uci === uci);
+    if (existing) {
+      setCurrentNodeId(existing.id);
+      setAnalysisSelected(null);
+      return true;
+    }
+
+    const id = `a${++analysisSequence.current}`;
+    const node: AnalysisNode = {
+      id,
+      parentId: currentNodeId,
+      san: move.san,
+      uci,
+      fen: board.fen(),
+      ply: (currentNode?.ply ?? analysisRootPly) + 1,
+    };
+    setAnalysisNodes((prev) => ({ ...prev, [id]: node }));
+    setCurrentNodeId(id);
+    setAnalysisSelected(null);
+    play(move.captured ? "capture" : "move");
+    return true;
+  }
+
+  function attemptAnalysisMove(from: string, to: string): boolean {
+    if (needsAnalysisPromotion(from, to)) {
+      setPromotion({ from, to });
+      return true;
+    }
+    return commitAnalysisMove(from, to);
+  }
+
+  function onAnalysisDrop({
+    sourceSquare,
+    targetSquare,
+  }: {
+    sourceSquare: string;
+    targetSquare: string | null;
+  }) {
+    setAnalysisSelected(null);
+    if (!targetSquare) return false;
+    return attemptAnalysisMove(sourceSquare, targetSquare);
+  }
+
+  function onAnalysisSquareClick({ square }: { square: string }) {
+    if (mode !== "analyse") return;
+
+    if (analysisSelected === square) {
+      setAnalysisSelected(null);
+      return;
+    }
+
+    if (analysisSelected) {
+      const moved = attemptAnalysisMove(analysisSelected, square);
+      setAnalysisSelected(null);
+      if (moved) return;
+    }
+
+    const board = new Chess(analysisFen);
+    const piece = board.get(square as never);
+    if (piece && piece.color === board.turn()) {
+      setAnalysisSelected(square);
+      play("navigate");
+    } else {
+      setAnalysisSelected(null);
+    }
+  }
+
   // ---- effects when you land on a move ------------------------------------
   const goTo = useCallback(
     (next: number) => {
+      setMode("review");
       const clamped = Math.max(0, Math.min(moves.length, next));
       setAt(clamped);
       if (clamped === 0) return;
@@ -397,15 +649,17 @@ export default function ReviewSequence({
       if (target && ["INPUT", "TEXTAREA", "SELECT"].includes(target.tagName)) return;
       if (event.key === "ArrowLeft") {
         event.preventDefault();
-        goTo(at - 1);
+        if (mode === "analyse") analysisUndo();
+        else goTo(at - 1);
       } else if (event.key === "ArrowRight") {
         event.preventDefault();
-        goTo(at + 1);
+        if (mode === "analyse") analysisRedo();
+        else goTo(at + 1);
       }
     }
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [at, goTo]);
+  }, [at, goTo, mode, analysisUndo, analysisRedo]);
 
   // ---- board decoration ---------------------------------------------------
   const currentLabel = at > 0 ? grades[at - 1] : null;
@@ -428,8 +682,61 @@ export default function ReviewSequence({
     }
   }
 
+  const analysisSquareStyles = hintStyles(analysisFen, {
+    selected: analysisSelected,
+    lastMove: currentNode?.uci ?? null,
+  });
+  const boardSquareStyles =
+    mode === "analyse" ? analysisSquareStyles : squareStyles;
+
+  const analysisTurn = turnOf(analysisFen);
+  const topEngineCp = scoreToCp(engineResult?.lines[0], true);
+  const engineWhiteCp =
+    topEngineCp === null ? null : analysisTurn === "w" ? topEngineCp : -topEngineCp;
+  const engineBest = engineEnabled ? engineResult?.bestmove ?? null : null;
+
+  const mistakeMoments = useMemo<MistakeMoment[]>(() => {
+    if (analysing || evals.length === 0) return [];
+    const found: MistakeMoment[] = [];
+    for (let index = 0; index < moves.length; index += 1) {
+      const label = grades[index];
+      if (
+        !label ||
+        !["inaccuracy", "mistake", "blunder"].includes(label)
+      ) {
+        continue;
+      }
+      const mover = turnAtPly(startFen, index);
+      const before = evals[index] ?? null;
+      const after = evals[index + 1] ?? null;
+      const loss =
+        before === null || after === null
+          ? 0
+          : Math.max(0, mover === "w" ? before - after : after - before);
+      found.push({
+        index,
+        move: moves[index],
+        label,
+        mover,
+        before,
+        after,
+        loss,
+      });
+    }
+    return found;
+  }, [analysing, evals, grades, moves, startFen]);
+
+  const visibleMistakes =
+    mistakeSide === "both"
+      ? mistakeMoments
+      : mistakeMoments.filter((mom) => mom.mover === mistakeSide);
+  const whiteMistakes = mistakeMoments.filter((mom) => mom.mover === "w").length;
+  const blackMistakes = mistakeMoments.filter((mom) => mom.mover === "b").length;
+
   const rows = groupMoves(moves, startFen);
   const counts = tally(grades);
+
+  const analysisLastSan = currentNode?.san ?? null;
 
   return (
     <main className="mx-auto w-full max-w-6xl 2xl:max-w-[1440px] px-6 py-8">
@@ -451,22 +758,82 @@ export default function ReviewSequence({
 
       <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_340px]">
         <section className="flex flex-col items-center gap-3">
+          <div className="flex w-full max-w-[600px] flex-wrap items-center justify-between gap-2">
+            <div className="inline-flex overflow-hidden rounded-lg border border-[var(--line)]">
+              <button
+                aria-pressed={mode === "review"}
+                onClick={leaveAnalysis}
+                className={`px-3 py-1.5 text-xs font-medium ${
+                  mode === "review"
+                    ? "bg-[var(--accent)] text-white"
+                    : "text-[var(--muted)] hover:bg-[var(--panel-2)] hover:text-[var(--text)]"
+                }`}
+              >
+                Review
+              </button>
+              <button
+                aria-pressed={mode === "analyse"}
+                onClick={openAnalysis}
+                className={`px-3 py-1.5 text-xs font-medium ${
+                  mode === "analyse"
+                    ? "bg-[var(--accent)] text-white"
+                    : "text-[var(--muted)] hover:bg-[var(--panel-2)] hover:text-[var(--text)]"
+                }`}
+              >
+                Analyse
+              </button>
+            </div>
+            <div className="flex flex-wrap items-center gap-2 text-[11px] text-[var(--muted)]">
+              {mode === "analyse" && (
+                <span className="rounded-full border border-[var(--line)] px-2 py-1">
+                  from move {analysisRootPly}
+                </span>
+              )}
+              <button
+                aria-pressed={engineEnabled}
+                onClick={() => setEngineEnabled((on) => !on)}
+                className={`rounded-full border px-2.5 py-1 transition ${
+                  engineEnabled
+                    ? "border-[var(--accent)]/40 bg-[var(--accent)]/10 text-[var(--accent)]"
+                    : "border-[var(--line)] text-[var(--muted)] hover:text-[var(--text)]"
+                }`}
+              >
+                Engine {engineEnabled ? "on" : "off"}
+              </button>
+            </div>
+          </div>
+
           <div className="relative w-full max-w-[600px]">
             <div className="overflow-hidden rounded-xl border border-[var(--line)] shadow-[0_10px_40px_-20px_rgba(0,0,0,0.9)]">
               <Chessboard
                 options={{
                   id: "review-board",
-                  position: positions[at] || positions[0] || "",
+                  position: analysisFen,
                   boardOrientation: orientation,
-                  squareStyles,
+                  squareStyles: boardSquareStyles,
                   animationDurationInMs: 200,
                   lightSquareStyle: LIGHT_SQUARE,
                   darkSquareStyle: DARK_SQUARE,
+                  onPieceDrop: mode === "analyse" ? onAnalysisDrop : undefined,
+                  onSquareClick: mode === "analyse" ? onAnalysisSquareClick : undefined,
                 }}
               />
             </div>
 
-            {at > 0 && style && style.glyph && badgeSquare && (
+            {mode === "analyse" && promotion && (
+              <PromotionPicker
+                side={analysisTurn === "w" ? "white" : "black"}
+                compact
+                onPick={(piece) => {
+                  const target = promotion;
+                  setPromotion(null);
+                  if (target) commitAnalysisMove(target.from, target.to, piece);
+                }}
+                onCancel={() => setPromotion(null)}
+              />
+            )}
+
+            {mode === "review" && at > 0 && style && style.glyph && badgeSquare && (
               <div
                 className="pointer-events-none absolute z-10"
                 style={{
@@ -486,7 +853,7 @@ export default function ReviewSequence({
               </div>
             )}
 
-            {showBest && bestForMove && (
+            {mode === "review" && showBest && bestForMove && (
               <BestArrow
                 from={bestForMove.slice(0, 2)}
                 to={bestForMove.slice(2, 4)}
@@ -494,7 +861,15 @@ export default function ReviewSequence({
               />
             )}
 
-            {flash && (
+            {mode === "analyse" && engineBest && engineBest.length >= 4 && (
+              <BestArrow
+                from={engineBest.slice(0, 2)}
+                to={engineBest.slice(2, 4)}
+                orientation={orientation}
+              />
+            )}
+
+            {flash && mode === "review" && (
               <div
                 key={flash.id}
                 className="animate-pop pointer-events-none absolute left-1/2 top-4 -translate-x-1/2 rounded-lg px-4 py-2 text-sm font-semibold shadow-lg"
@@ -508,51 +883,98 @@ export default function ReviewSequence({
             )}
           </div>
 
-          <div className="flex items-center gap-2">
-            <button
-              onClick={() => goTo(at - 1)}
-              disabled={at === 0}
-              className="rounded-lg border border-[var(--line)] px-3 py-1.5 text-xs disabled:opacity-40"
-            >
-              ← Prev
-            </button>
-            <button
-              onClick={() => {
-                setAutoPlay(!autoPlay);
-                if (at >= moves.length) goTo(0);
-              }}
-              disabled={analysing || moves.length === 0}
-              className="rounded-lg bg-[var(--accent)] px-3 py-1.5 text-xs font-medium text-[#0b1602] disabled:opacity-40"
-            >
-              {autoPlay ? "Pause" : "Replay"}
-            </button>
-            <button
-              onClick={() => goTo(at + 1)}
-              disabled={at >= moves.length}
-              className="rounded-lg border border-[var(--line)] px-3 py-1.5 text-xs disabled:opacity-40"
-            >
-              Next →
-            </button>
-            <span className="ml-2 font-mono text-xs text-[var(--muted)]">
-              {at} / {moves.length}
-            </span>
-            {evals.length > 0 && (
-              <span className="ml-3 rounded border border-[var(--line)] px-1.5 py-0.5 font-mono text-[11px] text-[var(--text)]">
-                {formatEval(evals[at] ?? null)}
+          {mode === "analyse" ? (
+            <div className="flex flex-wrap items-center justify-center gap-2">
+              <button
+                onClick={analysisUndo}
+                disabled={currentNodeId === "root"}
+                className="rounded-lg border border-[var(--line)] px-3 py-1.5 text-xs disabled:opacity-40"
+              >
+                ← Undo
+              </button>
+              <button
+                onClick={analysisRedo}
+                disabled={analysisChildren.length === 0}
+                className="rounded-lg border border-[var(--line)] px-3 py-1.5 text-xs disabled:opacity-40"
+              >
+                Redo →
+              </button>
+              <button
+                onClick={() => {
+                  setCurrentNodeId("root");
+                  setAnalysisSelected(null);
+                  setPromotion(null);
+                }}
+                disabled={currentNodeId === "root"}
+                className="rounded-lg border border-[var(--line)] px-3 py-1.5 text-xs disabled:opacity-40"
+              >
+                Start
+              </button>
+              <span className="ml-1 font-mono text-xs text-[var(--muted)]">
+                {analysisLine.length} / {Object.keys(analysisNodes).length}
               </span>
-            )}
-          </div>
+              <span className="ml-1 rounded border border-[var(--line)] px-1.5 py-0.5 font-mono text-[11px] text-[var(--text)]">
+                {engineThinking ? "searching…" : formatEval(engineWhiteCp)}
+              </span>
+            </div>
+          ) : (
+            <div className="flex flex-wrap items-center justify-center gap-2">
+              <button
+                onClick={() => goTo(at - 1)}
+                disabled={at === 0}
+                className="rounded-lg border border-[var(--line)] px-3 py-1.5 text-xs disabled:opacity-40"
+              >
+                ← Prev
+              </button>
+              <button
+                onClick={() => {
+                  setAutoPlay(!autoPlay);
+                  if (at >= moves.length) goTo(0);
+                }}
+                disabled={analysing || moves.length === 0}
+                className="rounded-lg bg-[var(--accent)] px-3 py-1.5 text-xs font-medium text-[#0b1602] disabled:opacity-40"
+              >
+                {autoPlay ? "Pause" : "Replay"}
+              </button>
+              <button
+                onClick={() => goTo(at + 1)}
+                disabled={at >= moves.length}
+                className="rounded-lg border border-[var(--line)] px-3 py-1.5 text-xs disabled:opacity-40"
+              >
+                Next →
+              </button>
+              <span className="ml-2 font-mono text-xs text-[var(--muted)]">
+                {at} / {moves.length}
+              </span>
+              {evals.length > 0 && (
+                <span className="ml-1 rounded border border-[var(--line)] px-1.5 py-0.5 font-mono text-[11px] text-[var(--text)]">
+                  {formatEval(evals[at] ?? null)}
+                </span>
+              )}
+            </div>
+          )}
 
-          {!analysing && moves.length > 1 && evals.length > 1 && (
+          {mode === "analyse" && (
+            <p className="max-w-[600px] text-center text-[11px] text-[var(--muted)]">
+              {analysisLastSan
+                ? `Line: ${analysisLine
+                    .map((node) => node.san)
+                    .join(" ")}`
+                : "Starting position for analysis — drag a piece or click two squares to create a branch."}
+            </p>
+          )}
+
+          {mode === "review" && !analysing && moves.length > 1 && evals.length > 1 && (
             <EvalGraph
               evals={evals}
               grades={grades}
+              moves={moves}
               at={at}
               onJump={goTo}
             />
           )}
 
-          {!analysing && showBest && bestForMove && (
+          {mode === "review" && !analysing && showBest && bestForMove && (
             <p className="text-[11px] text-[var(--muted)]">
               Better was{" "}
               <strong className="text-[var(--text)]">
@@ -643,9 +1065,9 @@ export default function ReviewSequence({
         </section>
 
         <aside className="flex flex-col gap-3">
-          <div className="rounded-xl border border-[var(--line)] bg-[var(--panel)] p-3">
+          <div className="order-3 rounded-xl border border-[var(--line)] bg-[var(--panel)] p-3">
             <p className="mb-2 text-[11px] uppercase tracking-wider text-[var(--muted)]">
-              Moves
+              {mode === "analyse" ? "Original game" : "Moves"}
             </p>
             {moves.length === 0 ? (
               <p className="text-xs text-[var(--muted)]">
@@ -664,7 +1086,7 @@ export default function ReviewSequence({
                         san={row.white.san}
                         label={grades[row.white.index]}
                         evalCp={evals[row.white.index + 1] ?? null}
-                        active={at === row.white.ply}
+                        active={mode === "review" && at === row.white.ply}
                         onClick={() => goTo(row.white.ply)}
                       />
                       {black ? (
@@ -672,7 +1094,7 @@ export default function ReviewSequence({
                           san={black.san}
                           label={grades[black.index]}
                           evalCp={evals[black.index + 1] ?? null}
-                          active={at === black.ply}
+                          active={mode === "review" && at === black.ply}
                           onClick={() => goTo(black.ply)}
                         />
                       ) : null}
@@ -683,19 +1105,268 @@ export default function ReviewSequence({
             )}
           </div>
 
-          {extra}
+          {mode === "analyse" && (
+            <div className="order-2 rounded-xl border border-[var(--line)] bg-[var(--panel)] p-3">
+              <div className="mb-2 flex items-center justify-between gap-2">
+                <p className="text-[11px] uppercase tracking-wider text-[var(--muted)]">
+                  Analysis line
+                </p>
+                <span className="text-[10px] text-[var(--muted)]">
+                  {analysisLine.length} move{analysisLine.length === 1 ? "" : "s"}
+                </span>
+              </div>
+              <div className="flex flex-wrap gap-1 font-mono text-[11px]">
+                <button
+                  onClick={() => {
+                    setCurrentNodeId("root");
+                    setAnalysisSelected(null);
+                  }}
+                  className={`rounded px-1.5 py-0.5 transition ${
+                    currentNodeId === "root"
+                      ? "bg-[var(--accent)]/15 text-[var(--accent)]"
+                      : "text-[var(--muted)] hover:bg-[var(--panel-2)] hover:text-[var(--text)]"
+                  }`}
+                >
+                  start
+                </button>
+                {analysisLine.map((node) => (
+                  <button
+                    key={node.id}
+                    onClick={() => {
+                      setCurrentNodeId(node.id);
+                      setAnalysisSelected(null);
+                    }}
+                    className={`rounded px-1.5 py-0.5 transition ${
+                      currentNodeId === node.id
+                        ? "bg-[var(--accent)]/15 text-[var(--accent)]"
+                        : "text-[var(--text)] hover:bg-[var(--panel-2)]"
+                    }`}
+                  >
+                    {Math.ceil(node.ply / 2)}
+                    {node.ply % 2 === 1 ? "." : "…"} {node.san}
+                  </button>
+                ))}
+              </div>
 
-          <p className="px-1 text-[10px] uppercase tracking-wider text-[var(--muted)]">
+              {analysisBranches.length > 0 && (
+                <div className="mt-3 border-t border-[var(--line)] pt-2">
+                  <p className="mb-1.5 text-[10px] uppercase tracking-wider text-[var(--muted)]">
+                    Saved branches
+                  </p>
+                  <div className="flex max-h-28 flex-wrap gap-1 overflow-y-auto">
+                    {analysisBranches.map((node) => {
+                      const parent =
+                        node.parentId === "root"
+                          ? null
+                          : analysisNodes[node.parentId] ?? null;
+                      return (
+                        <button
+                          key={node.id}
+                          onClick={() => {
+                            setCurrentNodeId(node.id);
+                            setAnalysisSelected(null);
+                          }}
+                          title={`Branch from ${parent ? parent.san : `move ${analysisRootPly}`}`}
+                          className="rounded border border-[var(--line)] px-2 py-1 text-[10px] transition hover:border-[var(--accent)] hover:text-[var(--accent)]"
+                        >
+                          {parent ? `${parent.san} → ` : ""}
+                          {node.san}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+
+              <p className="mt-2 text-[10px] leading-relaxed text-[var(--muted)]">
+                Moves you try here are branches. The original game is never changed.
+              </p>
+            </div>
+          )}
+
+          {mode === "analyse" && (
+            <div className="order-1 rounded-xl border border-[var(--line)] bg-[var(--panel)] p-3">
+              <div className="mb-2 flex items-center justify-between gap-2">
+                <p className="text-[11px] uppercase tracking-wider text-[var(--muted)]">
+                  Engine
+                </p>
+                <span className="text-[10px] text-[var(--muted)]">
+                  {engineEnabled
+                    ? engineThinking
+                      ? "searching…"
+                      : engineResult
+                        ? `depth ${engineResult.depth}`
+                        : "ready"
+                    : "off"}
+                </span>
+              </div>
+
+              {!engineEnabled ? (
+                <p className="text-xs leading-relaxed text-[var(--muted)]">
+                  Engine is off. Turn it on above the board to see the best move
+                  and the top three lines.
+                </p>
+              ) : engineThinking ? (
+                <div className="flex items-center gap-2 text-xs text-[var(--muted)]">
+                  <span className="h-2 w-2 animate-pulse rounded-full bg-[var(--accent)]" />
+                  Stockfish is searching this position…
+                </div>
+              ) : engineResult && engineResult.lines.length > 0 ? (
+                <>
+                  <div className="mb-2 flex items-center justify-between rounded-lg bg-[var(--panel-2)] px-2.5 py-1.5">
+                    <span className="text-[10px] uppercase tracking-wide text-[var(--muted)]">
+                      White eval
+                    </span>
+                    <span className="font-mono text-xs font-medium">
+                      {formatEval(engineWhiteCp)}
+                    </span>
+                  </div>
+                  <div className="flex flex-col gap-1">
+                    {engineResult.lines.map((line) => {
+                      const cp = scoreToCp(line, true);
+                      const whiteCp =
+                        cp === null ? null : analysisTurn === "w" ? cp : -cp;
+                      const candidate = line.pv[0] ?? null;
+                      const pv = pvToSan(analysisFen, line.pv);
+                      return (
+                        <button
+                          key={line.multipv}
+                          onClick={() => {
+                            if (!candidate || candidate.length < 4) return;
+                            const piece =
+                              candidate.length > 4
+                                ? (candidate[4] as PromotionPiece)
+                                : undefined;
+                            commitAnalysisMove(
+                              candidate.slice(0, 2),
+                              candidate.slice(2, 4),
+                              piece,
+                            );
+                          }}
+                          disabled={!candidate}
+                          className="group flex items-start gap-2 rounded-lg border border-transparent px-2 py-1.5 text-left transition hover:border-[var(--line)] hover:bg-[var(--panel-2)] disabled:opacity-50"
+                        >
+                          <span className="mt-px font-mono text-[10px] text-[var(--muted)]">
+                            {line.multipv}
+                          </span>
+                          <span className="w-10 shrink-0 font-mono text-[11px] font-medium">
+                            {formatEval(whiteCp)}
+                          </span>
+                          <span className="min-w-0 flex-1 truncate font-mono text-[11px] text-[var(--muted)] group-hover:text-[var(--text)]">
+                            {pv || "—"}
+                          </span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                  <p className="mt-1.5 text-[10px] text-[var(--muted)]">
+                    Click a line to play it. Green arrow = engine&apos;s first choice.
+                  </p>
+                </>
+              ) : (
+                <p className="text-xs text-[var(--muted)]">No engine result yet.</p>
+              )}
+            </div>
+          )}
+
+          {!analysing && summary && mistakeMoments.length > 0 && (
+            <div className="order-4 rounded-xl border border-[var(--line)] bg-[var(--panel)] p-3">
+              <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+                <p className="text-[11px] uppercase tracking-wider text-[var(--muted)]">
+                  Mistakes
+                </p>
+                <div className="inline-flex overflow-hidden rounded-md border border-[var(--line)] text-[10px]">
+                  {(
+                    [
+                      ["both", `All ${mistakeMoments.length}`],
+                      ["w", `White ${whiteMistakes}`],
+                      ["b", `Black ${blackMistakes}`],
+                    ] as const
+                  ).map(([side, label]) => (
+                    <button
+                      key={side}
+                      aria-pressed={mistakeSide === side}
+                      onClick={() => setMistakeSide(side)}
+                      className={`px-1.5 py-0.5 ${
+                        mistakeSide === side
+                          ? "bg-[var(--accent)] text-white"
+                          : "text-[var(--muted)] hover:bg-[var(--panel-2)] hover:text-[var(--text)]"
+                      }`}
+                    >
+                      {label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              {visibleMistakes.length === 0 ? (
+                <p className="py-2 text-xs text-[var(--muted)]">
+                  No {mistakeSide === "w" ? "White" : "Black"} mistakes in this game.
+                </p>
+              ) : (
+                <div className="max-h-44 overflow-y-auto">
+                  <ul className="divide-y divide-[var(--line)]">
+                    {visibleMistakes.map((moment) => {
+                      const label = LABEL_STYLES[moment.label];
+                      const best = bestUci[moment.index];
+                      const better =
+                        best && best !== moment.move.uci
+                          ? sanOf(positions[moment.index], best)
+                          : null;
+                      return (
+                        <li key={moment.index}>
+                          <button
+                            onClick={() => goTo(moment.move.ply)}
+                            className="flex w-full items-start gap-2 px-1 py-1.5 text-left transition hover:bg-[var(--panel-2)]"
+                          >
+                            <span
+                              className="mt-px rounded px-1 text-[10px] font-medium leading-4"
+                              style={{ background: label.color, color: label.text }}
+                            >
+                              {label.glyph}
+                            </span>
+                            <span className="min-w-0 flex-1">
+                              <span className="flex items-baseline justify-between gap-2">
+                                <span className="font-mono text-[11px] text-[var(--text)]">
+                                  {Math.ceil(moment.move.ply / 2)}
+                                  {moment.move.ply % 2 === 1 ? "." : "…"} {moment.move.san}
+                                </span>
+                                <span className="font-mono text-[10px] text-[var(--muted)]">
+                                  {formatEval(moment.before)} → {formatEval(moment.after)}
+                                </span>
+                              </span>
+                              {better && (
+                                <span className="mt-0.5 block text-[10px] text-[var(--muted)]">
+                                  Better:{" "}
+                                  <strong className="font-medium text-[var(--text)]">
+                                    {better}
+                                  </strong>
+                                </span>
+                              )}
+                            </span>
+                          </button>
+                        </li>
+                      );
+                    })}
+                  </ul>
+                </div>
+              )}
+            </div>
+          )}
+
+          {extra && <div className="order-5 flex flex-col gap-3">{extra}</div>}
+
+          <p className="order-6 px-1 text-[10px] uppercase tracking-wider text-[var(--muted)]">
             Stockfish 19 · 600 ms per position · 2 workers · MultiPV 2
           </p>
 
-          <p className="px-1 text-[11px] leading-relaxed text-[var(--muted)]">
+          <p className="order-6 px-1 text-[11px] leading-relaxed text-[var(--muted)]">
             Each move is graded against the engine&apos;s first choice; the badge
             sits on the square the piece landed on, and the arrow points at the
             move that should have been played. &quot;Brilliant&quot; needs the best
             move <em>and</em> a sacrifice; &quot;Great&quot; needs the best move to
             be clearly ahead of the second choice. Use ← / → to walk the line and
-            click a dot on the graph to jump to that move.
+            click a dot on the graph to jump to that move. Switch to Analyse to try
+            new moves as local branches — the original PGN is never changed.
           </p>
         </aside>
       </div>
@@ -744,6 +1415,25 @@ function sanOf(fen: string, uci: string): string {
   } catch {
     return uci;
   }
+}
+
+/** The first few moves of a principal variation, in readable SAN. */
+function pvToSan(fen: string, pv: string[]): string {
+  const board = new Chess(fen);
+  const parts: string[] = [];
+  for (const uci of pv.slice(0, 10)) {
+    try {
+      const move = board.move({
+        from: uci.slice(0, 2),
+        to: uci.slice(2, 4),
+        promotion: uci.slice(4) || undefined,
+      });
+      parts.push(move.san);
+    } catch {
+      break;
+    }
+  }
+  return parts.join(" ");
 }
 
 /** The engine's suggestion, drawn as a green arrow across the board. */
@@ -801,35 +1491,79 @@ const GRAPH_DOTS: MoveLabel[] = [
   "blunder",
 ];
 
-/** White's advantage over the whole game; click anywhere to jump there. */
+/** White's advantage over the whole game; hover to inspect, click to jump. */
 function EvalGraph({
   evals,
   grades,
+  moves,
   at,
   onJump,
 }: {
   evals: number[];
   grades: (MoveLabel | null)[];
+  moves: ReviewMove[];
   at: number;
   onJump: (ply: number) => void;
 }) {
   const total = evals.length - 1; // plies represented by the graph
+  const [hover, setHover] = useState<number | null>(null);
   if (total < 1) return null;
 
   const x = (index: number) => (index / total) * 100;
   const y = (cp: number) => 50 - ((winPercent(cp) - 50) / 50) * 44;
   const line = evals.map((cp, index) => `${x(index)},${y(cp)}`).join(" ");
+  const activeIndex = Math.max(0, Math.min(total, hover ?? at));
+  const activeMove = activeIndex > 0 ? moves[activeIndex - 1] : null;
+  const activeGrade = activeIndex > 0 ? grades[activeIndex - 1] : null;
+  const activeCp = evals[activeIndex] ?? null;
+
+  const indexAt = (clientX: number, element: HTMLElement) => {
+    const rect = element.getBoundingClientRect();
+    const ratio = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
+    return Math.round(ratio * total);
+  };
 
   return (
     <div className="w-full max-w-[600px]">
+      <div className="mb-1 flex items-center justify-between gap-3 px-1 text-[10px] text-[var(--muted)]">
+        <span>Evaluation</span>
+        <span className="flex items-center gap-1.5 tabular-nums">
+          {activeMove ? (
+            <>
+              <span className="font-mono">
+                {Math.ceil(activeMove.ply / 2)}
+                {activeMove.ply % 2 === 1 ? "." : "…"} {activeMove.san}
+              </span>
+              {activeGrade && (
+                <span
+                  className="rounded px-1 font-medium leading-4"
+                  style={{
+                    background: LABEL_STYLES[activeGrade].color,
+                    color: LABEL_STYLES[activeGrade].text,
+                  }}
+                >
+                  {LABEL_STYLES[activeGrade].glyph}
+                </span>
+              )}
+            </>
+          ) : (
+            <span className="font-mono">start</span>
+          )}
+          <span className="font-mono text-[var(--text)]">
+            {formatEval(activeCp)}
+          </span>
+        </span>
+      </div>
       <div
-        className="relative h-[76px] w-full cursor-pointer overflow-hidden rounded-xl border border-[var(--line)] bg-[var(--panel)]"
-        onClick={(event) => {
-          const rect = event.currentTarget.getBoundingClientRect();
-          const ratio = (event.clientX - rect.left) / rect.width;
-          onJump(Math.round(ratio * total));
-        }}
-        title="Click to jump to a move"
+        className="relative h-[76px] w-full cursor-crosshair touch-none overflow-hidden rounded-xl border border-[var(--line)] bg-[var(--panel)]"
+        onPointerMove={(event) =>
+          setHover(indexAt(event.clientX, event.currentTarget))
+        }
+        onPointerLeave={() => setHover(null)}
+        onClick={(event) => onJump(indexAt(event.clientX, event.currentTarget))}
+        title="Hover to inspect a move · click to jump there"
+        role="img"
+        aria-label="Evaluation graph. Hover to inspect, click to jump."
       >
         <svg
           viewBox="0 0 100 100"
@@ -858,6 +1592,32 @@ function EvalGraph({
           />
         </svg>
 
+        {hover !== null && (
+          <div
+            className="pointer-events-none absolute inset-y-0 w-px bg-[var(--muted)]/50"
+            style={{ left: `${x(hover)}%` }}
+          />
+        )}
+
+        <div
+          className="pointer-events-none absolute inset-y-0 w-px bg-[var(--accent)]"
+          style={{ left: `${x(at)}%` }}
+        />
+
+        {hover !== null && (
+          <div
+            className="pointer-events-none absolute h-2 w-2 -translate-x-1/2 -translate-y-1/2 rounded-full border border-[var(--panel)]"
+            style={{
+              left: `${x(hover)}%`,
+              top: `${y(evals[hover] ?? 0)}%`,
+              background:
+                (hover > 0 && grades[hover - 1]
+                  ? LABEL_STYLES[grades[hover - 1] as MoveLabel].color
+                  : "var(--accent)"),
+            }}
+          />
+        )}
+
         {grades.map((grade, index) =>
           grade && GRAPH_DOTS.includes(grade) ? (
             <button
@@ -876,11 +1636,6 @@ function EvalGraph({
             />
           ) : null,
         )}
-
-        <div
-          className="pointer-events-none absolute inset-y-0 w-px bg-[var(--accent)]"
-          style={{ left: `${x(at)}%` }}
-        />
       </div>
     </div>
   );
