@@ -1,5 +1,6 @@
 import Link from "next/link";
 
+import { backfillMistakes, mistakeStats } from "@/lib/mistakes";
 import { getTrainOverview } from "./actions";
 
 export const dynamic = "force-dynamic";
@@ -17,7 +18,11 @@ function whenLabel(iso: string | null): string {
 }
 
 export default async function TrainPage() {
-  const overview = await getTrainOverview();
+  await backfillMistakes(20);
+  const [overview, mistakes] = await Promise.all([
+    getTrainOverview(),
+    mistakeStats(),
+  ]);
   const due = overview.reduce((sum, item) => sum + item.due, 0);
   const fresh = overview.reduce((sum, item) => sum + item.fresh, 0);
   const positions = overview.reduce((sum, item) => sum + item.positions, 0);
@@ -97,6 +102,28 @@ export default async function TrainPage() {
           </span>
         </Link>
       )}
+
+      <section className="mb-4 rounded-xl border border-[var(--line)] bg-[var(--panel)] px-5 py-4">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <p className="text-[10px] uppercase tracking-[0.16em] text-[var(--accent)]">
+              From your games
+            </p>
+            <p className="mt-1 text-sm font-medium">Mistake trainer</p>
+            <p className="mt-1 max-w-2xl text-[11.5px] leading-relaxed text-[var(--muted)]">
+              {mistakes.total > 0
+                ? `${mistakes.total} position${mistakes.total === 1 ? "" : "s"} taken from your reviewed games · ${mistakes.due} due · ${mistakes.mastered} mastered · ${mistakes.accuracy}% recall.`
+                : "Review a game and every mistake or blunder on your side becomes a drill card. Nothing to memorise by hand."}
+            </p>
+          </div>
+          <Link
+            href="/train/mistakes"
+            className="rounded-lg bg-[var(--accent)] px-3 py-2 text-xs font-semibold text-[#0b1602] transition hover:brightness-110"
+          >
+            {mistakes.due > 0 ? `Drill ${mistakes.due} due →` : "Open deck →"}
+          </Link>
+        </div>
+      </section>
 
       <section className="rounded-xl border border-[var(--line)] bg-[var(--panel)] px-4 py-3">
         <div className="flex flex-wrap items-center justify-between gap-2">

@@ -21,6 +21,8 @@ import type { NodeDTO } from "@/lib/types";
 import { START_RATING, updateRating } from "@/lib/elo";
 import { getViewer } from "@/lib/auth";
 import { rateLimit } from "@/lib/rate-limit";
+import { storeImportedGame } from "@/lib/imported-games";
+import { syncMistakesFromAnalysis } from "@/lib/mistakes";
 
 type DbNode = {
   id: string;
@@ -1330,51 +1332,8 @@ export async function importGame(input: {
   pgn: string;
   as: "white" | "black";
 }): Promise<{ id: string }> {
-  const raw = input.pgn.trim();
-  if (!raw) throw new Error("Paste a PGN first.");
-  if (raw.length > 200_000) throw new Error("That PGN is too long to import.");
-
-  const board = new Chess();
-  try {
-    board.loadPgn(raw);
-  } catch {
-    throw new Error("That text is not a PGN game chess.js can read.");
-  }
-
-  const history = board.history({ verbose: true });
-  if (history.length === 0) throw new Error("This PGN has no moves in it.");
-
-  const headers = board.getHeaders();
-  const resultHeader = headers.Result ?? "*";
-  const winner =
-    resultHeader === "1-0" ? "white" : resultHeader === "0-1" ? "black" : "draw";
-  const outcome: "win" | "loss" | "draw" =
-    winner === "draw" ? "draw" : winner === input.as ? "win" : "loss";
-
-  const white = headers.White || "White";
-  const black = headers.Black || "Black";
-  const event = headers.Event && headers.Event !== "?" ? headers.Event : "Imported game";
-
-  const row = await prisma.game.create({
-    data: {
-      kind: "import",
-      playerColor: input.as,
-      result: outcome,
-      resultText: `${white} vs ${black} · ${resultHeader}`.slice(0, 120),
-      // The engine fields are meaningless for an imported game, so they keep
-      // their defaults and the review labels it by its PGN headers instead.
-      skill: 12,
-      level: 4,
-      botId: null,
-      timeControl: (headers.TimeControl || "unlimited").slice(0, 12),
-      startFen: (headers.FEN ?? "").slice(0, 200),
-      pgn: board.pgn({ maxWidth: 80, newline: "\n" }),
-      fen: board.fen(),
-      plies: history.length,
-    },
-  });
-
-  void event;
+  if (!input.pgn.trim()) throw new Error("Paste a PGN first.");
+  const row = await storeImportedGame({ pgn: input.pgn, as: input.as });
   revalidatePath("/games");
   revalidatePath("/");
   return { id: row.id };
@@ -1396,8 +1355,18 @@ export async function saveGameAnalysis(input: {
     data: { analysis: input.analysis.slice(0, 200000) },
   });
 
+  // Blunder extraction is a consequence of the review, not a second trip:
+  // if it fails, the game is still reviewed and the next visit retries it.
+  try {
+    await syncMistakesFromAnalysis(input.gameId, input.analysis);
+  } catch {
+    // A malformed analysis blob should not fail the review write.
+  }
+
   revalidatePath("/games");
   revalidatePath(`/games/${input.gameId}`);
+  revalidatePath("/train");
+  revalidatePath("/train/mistakes");
 }
 
 export async function deleteGame(gameId: string): Promise<void> {

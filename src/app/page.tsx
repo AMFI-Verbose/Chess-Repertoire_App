@@ -5,7 +5,8 @@ import StaticBoard from "@/components/StaticBoard";
 import LiveTime from "@/components/LiveTime";
 import { getViewer } from "@/lib/auth";
 import { listOpenDuels } from "@/lib/duels";
-import { listOpenTournaments, refreshTournamentCalendar } from "@/lib/tournaments";
+import { ensureClubArenas, listOpenTournaments, refreshTournamentCalendar } from "@/lib/tournaments";
+import { mistakeStats } from "@/lib/mistakes";
 import { prisma } from "@/lib/prisma";
 import { createRepertoire } from "./actions";
 import { opponentLabel } from "@/lib/bots";
@@ -15,8 +16,9 @@ import { getTrainOverview } from "@/app/train/actions";
 export const dynamic = "force-dynamic";
 
 export default async function DashboardPage() {
-  // Real Lichess arenas, refreshed at most every ten minutes.
-  await refreshTournamentCalendar();
+  // Real Lichess arenas and the recurring club series, refreshed at most
+  // every ten minutes; the club schedule fills itself.
+  await Promise.all([refreshTournamentCalendar(), ensureClubArenas()]);
   const viewer = await getViewer();
   const train = await getTrainOverview();
   const trainDue = train.reduce((sum, item) => sum + item.due + item.fresh, 0);
@@ -36,6 +38,7 @@ export default async function DashboardPage() {
     members,
     tournaments,
     donations,
+    mistakeDeck,
   ] = await Promise.all([
       prisma.repertoire.findMany({
         orderBy: { updatedAt: "desc" },
@@ -76,6 +79,7 @@ export default async function DashboardPage() {
       prisma.user.count(),
       listOpenTournaments(200),
       prisma.donation.aggregate({ _sum: { amountCents: true }, _count: true }),
+      mistakeStats(),
     ]);
 
   let streak = 0;
@@ -155,6 +159,28 @@ export default async function DashboardPage() {
           </div>
         ))}
       </div>
+
+      {mistakeDeck.due > 0 && (
+        <Link
+          href="/train/mistakes"
+          className="group mb-3 flex flex-wrap items-center gap-4 rounded-xl border border-[#e0564b]/35 bg-[var(--panel)] px-5 py-3.5 transition hover:border-[#e0564b]"
+        >
+          <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-[#e0564b]/35 bg-[#e0564b]/10 text-[15px] font-semibold text-[#e0564b]">
+            !
+          </span>
+          <span className="min-w-0 flex-1">
+            <span className="block font-medium">
+              {mistakeDeck.due} mistake{mistakeDeck.due === 1 ? "" : "s"} from your games due
+            </span>
+            <span className="mt-0.5 block text-xs text-[var(--muted)]">
+              The exact positions where you went wrong — find the move you missed
+            </span>
+          </span>
+          <span className="text-xs text-[var(--accent)] transition group-hover:translate-x-0.5">
+            Drill →
+          </span>
+        </Link>
+      )}
 
       {trainDue > 0 && (
         <Link

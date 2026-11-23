@@ -17,12 +17,12 @@ export default function ImportPage() {
           ← Your games
         </Link>
         <h1 className="mt-1 text-2xl font-semibold tracking-tight">
-          Import a game
+          Import your games
         </h1>
         <p className="mt-2 max-w-xl text-sm leading-relaxed text-[var(--muted)]">
-          Bring a game in from anywhere and review it with the same engine pass
-          every other game gets: accuracy, centipawn loss, a label on every move
-          and a graph you can click.
+          Pull your recent Lichess or chess.com games by username, or paste a single
+          PGN. Every imported game opens in the same review: accuracy, centipawn
+          loss, a label on every move and a graph you can click.
         </p>
       </header>
 
@@ -30,8 +30,8 @@ export default function ImportPage() {
 
       <p className="mt-4 px-1 text-[11px] leading-relaxed text-[var(--muted)]">
         Imported games are stored in the same local database and appear in your
-        games list, labelled by their PGN headers rather than by an opponent
-        rating.
+        games list with their real date and original link. Reviewing one also
+        turns your mistakes into drill cards for the mistake trainer.
       </p>
     </main>
   );

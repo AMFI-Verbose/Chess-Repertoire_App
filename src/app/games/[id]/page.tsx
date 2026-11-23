@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { notFound } from "next/navigation";
 
 import { prisma } from "@/lib/prisma";
@@ -7,6 +8,7 @@ import PublishToCommunity from "@/components/PublishToCommunity";
 import { START_FEN, normalizedFen, parsePgnGame, pgnHeader } from "@/lib/chess";
 import { opponentLabel } from "@/lib/bots";
 import { getViewer } from "@/lib/auth";
+import { mistakeCountForGame, syncMistakesFromAnalysis } from "@/lib/mistakes";
 
 export const dynamic = "force-dynamic";
 
@@ -26,6 +28,17 @@ export default async function GamePage({
     getViewer(),
   ]);
   if (!game) notFound();
+
+  // Old reviews predate the mistake trainer. Try the reshape once here, then
+  // the marker prevents this game from being parsed on every visit.
+  if (game.analysis && !game.mistakesSyncedAt) {
+    try {
+      await syncMistakesFromAnalysis(game.id, game.analysis);
+    } catch {
+      // The game review itself is unaffected.
+    }
+  }
+  const mistakeCount = await mistakeCountForGame(game.id);
 
   const parsed = parsePgnGame(game.pgn);
   if (!parsed) notFound();
@@ -87,6 +100,24 @@ export default async function GamePage({
           >
             {game.result.toUpperCase()} · {game.playerColor}
           </div>
+          {mistakeCount > 0 && (
+            <Link
+              href={`/train/mistakes?game=${game.id}`}
+              className="rounded-lg border border-[var(--accent)]/50 bg-[var(--accent)]/10 px-3 py-2 text-center text-[11px] font-medium text-[var(--text)] transition hover:border-[var(--accent)]"
+            >
+              Drill the {mistakeCount} mistake{mistakeCount === 1 ? "" : "s"} from this game →
+            </Link>
+          )}
+          {game.externalUrl && (
+            <a
+              href={game.externalUrl}
+              target="_blank"
+              rel="noreferrer"
+              className="rounded-lg border border-[var(--line)] px-3 py-2 text-center text-[11px] text-[var(--muted)] transition hover:border-[var(--accent)] hover:text-[var(--text)]"
+            >
+              Original game ↗
+            </a>
+          )}
           <CopyPgn pgn={game.pgn} />
           <PublishToCommunity
             gameId={game.id}

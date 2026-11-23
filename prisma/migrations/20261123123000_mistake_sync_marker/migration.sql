@@ -1,0 +1,1 @@
+ALTER TABLE "Game" ADD COLUMN "mistakesSyncedAt" TIMESTAMP(3);
