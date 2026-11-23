@@ -18,7 +18,7 @@ export default async function StudyPage({
   if (!study) notFound();
 
   return (
-    <main className="mx-auto max-w-5xl px-6 py-10">
+    <main className="mx-auto max-w-6xl 2xl:max-w-[1440px] px-6 py-10">
       <header className="mb-6">
         <Link
           href="/community"

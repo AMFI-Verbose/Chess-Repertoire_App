@@ -387,7 +387,7 @@ export default function RepertoireBuilder({
   return (
     <div className="min-h-dvh">
       <header className="border-b border-[var(--line)]">
-        <div className="mx-auto flex max-w-6xl flex-wrap items-center gap-3 px-6 py-4">
+        <div className="mx-auto flex max-w-6xl 2xl:max-w-[1440px] flex-wrap items-center gap-3 px-6 py-4">
           <Link
             href="/"
             className="rounded-lg border border-[var(--line)] px-2.5 py-1.5 text-xs text-[var(--muted)] transition hover:border-[var(--accent)] hover:text-[var(--text)]"
@@ -437,7 +437,7 @@ export default function RepertoireBuilder({
         </div>
       </header>
 
-      <main className="mx-auto grid max-w-6xl gap-8 px-6 py-8 lg:grid-cols-[minmax(0,1fr)_380px]">
+      <main className="mx-auto grid max-w-6xl 2xl:max-w-[1440px] gap-8 px-6 py-8 lg:grid-cols-[minmax(0,1fr)_380px]">
         {/* ---------- Board column ---------- */}
         <section className="flex flex-col items-center gap-4">
           <div className="board-glow relative w-full max-w-[540px] overflow-hidden rounded-xl border border-[var(--line)] shadow-2xl shadow-black/40">

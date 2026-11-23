@@ -43,7 +43,7 @@ export default function LearnOverview() {
   }
 
   return (
-    <main className="mx-auto w-full max-w-5xl px-6 py-8">
+    <main className="mx-auto w-full max-w-6xl 2xl:max-w-[1440px] px-6 py-8">
       <header className="mb-7 flex flex-wrap items-end justify-between gap-5">
         <div>
           <Link

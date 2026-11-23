@@ -262,7 +262,7 @@ export default function OpeningsExplorer({
   const styles = line ? moveStyles(line.ucis, step) : undefined;
 
   return (
-    <main className="mx-auto w-full max-w-6xl px-6 py-8">
+    <main className="mx-auto w-full max-w-6xl 2xl:max-w-[1440px] px-6 py-8">
       <header className="mb-6 flex flex-wrap items-end justify-between gap-4">
         <div>
           <Link

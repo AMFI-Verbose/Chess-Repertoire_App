@@ -113,7 +113,7 @@ export default async function DashboardPage() {
   ).slice(0, 4);
 
   return (
-    <main className="mx-auto max-w-5xl px-6 py-14">
+    <main className="mx-auto max-w-6xl 2xl:max-w-[1440px] px-6 py-14">
       <header className="mb-10">
         <p className="mb-2 text-[11px] uppercase tracking-[0.2em] text-[var(--accent)]">
           chess · opening trainer
@@ -148,7 +148,7 @@ export default async function DashboardPage() {
         </div>
       </header>
 
-      <div className="mb-8 grid grid-cols-2 gap-3 sm:grid-cols-4">
+      <div className="mb-8 grid grid-cols-2 gap-3 md:grid-cols-4">
         {stats.map((stat) => (
           <div
             key={stat.label}
