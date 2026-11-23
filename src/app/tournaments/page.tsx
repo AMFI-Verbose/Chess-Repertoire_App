@@ -6,6 +6,8 @@ import { createTournamentAction, refreshCalendarAction } from "@/app/tournaments
 import { getViewer } from "@/lib/auth";
 import { TIME_CONTROLS } from "@/lib/gameOptions";
 import {
+  ensureClubArenas,
+  getClubSeason,
   listFinishedTournaments,
   listOpenTournaments,
   listRecentTournaments,
@@ -62,13 +64,18 @@ export default async function TournamentsPage({
   searchParams: Promise<{ error?: string; source?: string; q?: string; speed?: string }>;
 }) {
   const { error, source, q, speed: speedParam } = await searchParams;
-  await refreshTournamentCalendar();
-  const viewer = await getViewer();
+  await Promise.all([refreshTournamentCalendar(), ensureClubArenas()]);
+  const [viewer, season] = await Promise.all([getViewer(), getClubSeason(10)]);
   const [open, recent, finished] = await Promise.all([
     listOpenTournaments(),
     listRecentTournaments(),
     listFinishedTournaments(40),
   ]);
+  const viewerRank = viewer ? season.find((row) => row.userId === viewer.id)?.rank : null;
+  const seasonLabel = new Intl.DateTimeFormat("en-GB", {
+    month: "long",
+    year: "numeric",
+  }).format(new Date());
   const now = Date.now();
 
   const active = TABS.some((tab) => tab.id === source) ? (source ?? "all") : "all";
@@ -404,6 +411,47 @@ export default async function TournamentsPage({
                 );
               })}
             </ul>
+          )}
+        </section>
+      )}
+
+      {showClub && (
+        <section className="mt-5 overflow-hidden rounded-lg border border-[var(--line)] bg-[var(--panel)]">
+          <div className="flex items-baseline justify-between border-b border-[var(--line)] px-4 py-2.5">
+            <h2 className="text-[13px] font-semibold">Club season · {seasonLabel}</h2>
+            <span className="text-[10px] uppercase tracking-wider text-[var(--muted)]">
+              2 pts win · 1 pt draw
+            </span>
+          </div>
+          {season.length === 0 ? (
+            <p className="px-4 py-6 text-[12px] text-[var(--muted)]">
+              No scores yet this month. Join a club arena to put your name on the board.
+            </p>
+          ) : (
+            <ol className="divide-y divide-[var(--line)]">
+              {season.map((row) => (
+                <li
+                  key={row.userId}
+                  className={`flex items-center gap-3 px-4 py-2.5 text-[12px] ${
+                    row.userId === viewer?.id ? "bg-[var(--accent)]/5 font-medium" : ""
+                  }`}
+                >
+                  <span className="w-5 text-right text-[10px] tabular-nums text-[var(--muted)]">
+                    {row.rank}
+                  </span>
+                  <span className="min-w-0 flex-1 truncate">@{row.handle}</span>
+                  <span className="text-[10px] text-[var(--muted)]">
+                    {row.events} event{row.events === 1 ? "" : "s"}
+                  </span>
+                  <span className="w-12 text-right tabular-nums">{row.score} pts</span>
+                </li>
+              ))}
+            </ol>
+          )}
+          {viewerRank && viewerRank > 10 && (
+            <p className="border-t border-[var(--line)] px-4 py-2 text-[10.5px] text-[var(--muted)]">
+              You are #{viewerRank} this month.
+            </p>
           )}
         </section>
       )}

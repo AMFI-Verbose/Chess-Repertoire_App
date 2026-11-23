@@ -131,9 +131,41 @@ model Game {
   plies       Int      @default(0)
   /// JSON written by the review pass: accuracy + centipawn loss per colour.
   analysis    String?
+  /// Stable id from Lichess/chess.com, so importing a history twice is safe.
+  externalId  String?  @unique
+  externalUrl String?
+  /// When the review's blunders were extracted into drill cards. Zero cards
+  /// is a valid result, so this is what stops re-parsing the same game forever.
+  mistakesSyncedAt DateTime?
   createdAt   DateTime @default(now())
+  mistakes    Mistake[]
 
   @@index([createdAt])
+}
+
+/// A losing move taken out of a reviewed game and turned into a drill card.
+/// Scheduling is deliberately simpler than repertoire SM-2: one position,
+/// one best move, 1 → 3 → 7 → 21 → 45 → 90 days.
+model Mistake {
+  id          String    @id @default(cuid())
+  gameId      String
+  game        Game      @relation(fields: [gameId], references: [id], onDelete: Cascade)
+  ply         Int
+  fen         String
+  solution    String // best move in UCI
+  playedUci   String
+  playedSan   String    @default("")
+  bestSan     String    @default("")
+  label       String // "mistake" | "blunder"
+  dueAt       DateTime  @default(now())
+  interval    Int       @default(0)
+  attempts    Int       @default(0)
+  solvedCount Int       @default(0)
+  lastSeen    DateTime?
+  createdAt   DateTime  @default(now())
+
+  @@unique([gameId, ply])
+  @@index([dueAt])
 }
 
 /// One local player. There is no auth — this row *is* the current user.

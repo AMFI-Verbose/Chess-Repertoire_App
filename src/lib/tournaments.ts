@@ -190,10 +190,195 @@ export async function refreshChessComTournaments(force = false) {
   }
 }
 
-/** Chess.com renders its public calendar in Pacific time. */
+/**
+ * Chess.com renders its public calendar in Pacific time. Pacific is not
+ * always UTC-8: from March to early November it is UTC-7. Hard-coding -08:00
+ * silently shifted every summer arena by an hour, so the offset is derived
+ * from the event's own date.
+ */
+function pacificOffset(date: string): string | null {
+  const probe = new Date(`${date} 12:00:00 UTC`);
+  if (Number.isNaN(probe.getTime())) return null;
+  const zone = new Intl.DateTimeFormat("en-US", {
+    timeZone: "America/Los_Angeles",
+    timeZoneName: "longOffset",
+  })
+    .formatToParts(probe)
+    .find((part) => part.type === "timeZoneName")?.value;
+  const match = zone?.match(/GMT([+-]\d{2}:\d{2})/);
+  return match ? match[1] : null;
+}
+
 function parseChessComDate(date: string, time: string) {
-  const parsed = new Date(`${date} ${time} -08:00`);
+  const monthNames = [
+    "Jan", "Feb", "Mar", "Apr", "May", "Jun",
+    "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
+  ];
+  const dateMatch = date.match(/([A-Za-z]{3})\s+(\d{1,2}),\s+(\d{4})/);
+  const timeMatch = time.match(/(\d{1,2}):(\d{2})\s*([AP]M)/i);
+  if (!dateMatch || !timeMatch) return null;
+  const month = monthNames.indexOf(dateMatch[1].slice(0, 3));
+  if (month < 0) return null;
+  let hour = Number(timeMatch[1]) % 12;
+  if (timeMatch[3].toUpperCase() === "PM") hour += 12;
+  const offset = pacificOffset(`${dateMatch[1]} ${dateMatch[2]}, ${dateMatch[3]}`);
+  if (!offset) return null;
+  const parsed = new Date(
+    `${dateMatch[3]}-${String(month + 1).padStart(2, "0")}-${String(
+      Number(dateMatch[2]),
+    ).padStart(2, "0")}T${String(hour).padStart(2, "0")}:${timeMatch[2]}:00${offset}`,
+  );
   return Number.isNaN(parsed.getTime()) ? null : parsed;
+}
+
+/**
+ * The club used to have two seeded arenas and then an empty tab forever.
+ * These two series fill it without pretending to be a full tournament engine:
+ * a nightly blitz arena every evening and a longer rapid arena on Sundays,
+ * created ahead of time with a stable external id so redeploys cannot duplicate
+ * them.
+ */
+const CLUB_DAILY_HOUR = 20;
+const CLUB_DAILY_MINUTES = 90;
+const CLUB_SUNDAY_HOUR = 18;
+const CLUB_SUNDAY_MINUTES = 120;
+
+let lastClubSchedule = 0;
+
+function shanghaiNowParts(now = new Date()) {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Shanghai",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(now);
+  const value = (type: string) => Number(parts.find((part) => part.type === type)?.value);
+  return { year: value("year"), month: value("month"), day: value("day") };
+}
+
+/** A Shanghai wall-clock time as a real Date, without relying on server TZ. */
+function shanghaiAt(dayOffset: number, hour: number, minute = 0) {
+  const { year, month, day } = shanghaiNowParts();
+  // Shanghai has been UTC+8 with no DST since 1991.
+  return new Date(Date.UTC(year, month - 1, day + dayOffset, hour - 8, minute));
+}
+
+function shanghaiDateKey(date: Date) {
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Shanghai",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(date);
+}
+
+function shanghaiDayLabel(date: Date) {
+  return new Intl.DateTimeFormat("en-GB", {
+    timeZone: "Asia/Shanghai",
+    weekday: "short",
+    day: "numeric",
+    month: "short",
+  }).format(date);
+}
+
+function shanghaiWeekday(date: Date) {
+  const { year, month, day } = shanghaiNowParts(date);
+  return new Date(Date.UTC(year, month - 1, day)).getUTCDay();
+}
+
+/** Create the next week of club arenas. Safe to call on every page load. */
+export async function ensureClubArenas(): Promise<void> {
+  const now = Date.now();
+  if (now - lastClubSchedule < 5 * 60_000) return;
+  lastClubSchedule = now;
+
+  const rows: {
+    name: string;
+    startsAt: Date;
+    endsAt: Date;
+    timeControl: string;
+    source: string;
+    externalId: string;
+  }[] = [];
+
+  for (let offset = 0; offset < 7; offset += 1) {
+    const startsAt = shanghaiAt(offset, CLUB_DAILY_HOUR);
+    if (startsAt.getTime() + CLUB_DAILY_MINUTES * 60_000 <= now) continue;
+    const endsAt = new Date(startsAt.getTime() + CLUB_DAILY_MINUTES * 60_000);
+    rows.push({
+      name: `Nightly Blitz Arena · ${shanghaiDayLabel(startsAt)}`,
+      startsAt,
+      endsAt,
+      timeControl: "3+2",
+      source: "local",
+      externalId: `club-nightly-${shanghaiDateKey(startsAt)}`,
+    });
+  }
+
+  // The next four Sundays, including today when it has not started yet.
+  for (let offset = 0; offset < 28; offset += 1) {
+    const startsAt = shanghaiAt(offset, CLUB_SUNDAY_HOUR);
+    if (shanghaiWeekday(startsAt) !== 0) continue;
+    if (startsAt.getTime() + CLUB_SUNDAY_MINUTES * 60_000 <= now) continue;
+    const endsAt = new Date(startsAt.getTime() + CLUB_SUNDAY_MINUTES * 60_000);
+    rows.push({
+      name: `Sunday Rapid Arena · ${shanghaiDayLabel(startsAt)}`,
+      startsAt,
+      endsAt,
+      timeControl: "10+0",
+      source: "local",
+      externalId: `club-sunday-${shanghaiDateKey(startsAt)}`,
+    });
+  }
+
+  if (rows.length === 0) return;
+  await prisma.tournament.createMany({ data: rows, skipDuplicates: true });
+}
+
+export type ClubSeasonRow = {
+  rank: number;
+  userId: string;
+  handle: string;
+  score: number;
+  events: number;
+};
+
+export async function getClubSeason(take = 8): Promise<ClubSeasonRow[]> {
+  const now = new Date();
+  const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+  const tournaments = await prisma.tournament.findMany({
+    where: { source: "local", startsAt: { gte: monthStart } },
+    select: { entries: { select: { userId: true, score: true } } },
+  });
+
+  const totals = new Map<string, { score: number; events: number }>();
+  for (const tournament of tournaments) {
+    for (const entry of tournament.entries) {
+      const current = totals.get(entry.userId) ?? { score: 0, events: 0 };
+      current.score += entry.score;
+      current.events += 1;
+      totals.set(entry.userId, current);
+    }
+  }
+
+  const rows = Array.from(totals.entries())
+    .map(([userId, value]) => ({ userId, ...value }))
+    .sort((a, b) => b.score - a.score || b.events - a.events)
+    .slice(0, take);
+  if (rows.length === 0) return [];
+
+  const users = await prisma.user.findMany({
+    where: { id: { in: rows.map((row) => row.userId) } },
+    select: { id: true, handle: true },
+  });
+  const handles = new Map(users.map((user) => [user.id, user.handle]));
+  return rows.map((row, index) => ({
+    rank: index + 1,
+    userId: row.userId,
+    handle: handles.get(row.userId) ?? "Player",
+    score: row.score,
+    events: row.events,
+  }));
 }
 
 /** Refresh both external calendars at most every ten minutes. */

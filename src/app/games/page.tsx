@@ -43,6 +43,7 @@ export default async function GamesPage() {
   const games = await prisma.game.findMany({
     orderBy: { createdAt: "desc" },
     take: 100,
+    include: { _count: { select: { mistakes: true } } },
   });
 
   const wins = games.filter((game) => game.result === "win").length;
@@ -179,6 +180,15 @@ export default async function GamesPage() {
                     }).format(game.createdAt)}
                   </span>
                 </span>
+
+                {game._count.mistakes > 0 && (
+                  <Link
+                    href={`/train/mistakes?game=${game.id}`}
+                    className="rounded-full border border-[#e0564b]/35 bg-[#e0564b]/5 px-2 py-0.5 text-[10.5px] text-[#c64a40] transition hover:border-[#e0564b]"
+                  >
+                    {game._count.mistakes} mistake{game._count.mistakes === 1 ? "" : "s"}
+                  </Link>
+                )}
 
                 {yourAccuracy !== null ? (
                   <span className="rounded-full border border-[var(--line)] px-2 py-0.5 text-[11px] tabular-nums text-[var(--muted)]">
