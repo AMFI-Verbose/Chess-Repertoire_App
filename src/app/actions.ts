@@ -23,6 +23,12 @@ import { getViewer } from "@/lib/auth";
 import { rateLimit } from "@/lib/rate-limit";
 import { storeImportedGame } from "@/lib/imported-games";
 import { syncMistakesFromAnalysis } from "@/lib/mistakes";
+import {
+  ensurePlayerRatings,
+  getPlayerRating,
+  recordEngineGameRating,
+  recordPuzzleAttemptForUser,
+} from "@/lib/player-ratings";
 
 type DbNode = {
   id: string;
@@ -604,23 +610,71 @@ async function ensureProfile() {
 }
 
 async function puzzleStats(): Promise<PuzzleStats> {
+  const viewer = await getViewer();
+
+  if (viewer) {
+    await ensurePlayerRatings(viewer.id);
+    const ratingRow = await getPlayerRating(viewer.id, "puzzle");
+    const [attempted, solved, recent, last] = await Promise.all([
+      prisma.puzzleAttempt.count({ where: { userId: viewer.id } }),
+      prisma.puzzleAttempt.count({ where: { userId: viewer.id, solved: true } }),
+      prisma.puzzleAttempt.findMany({
+        where: { userId: viewer.id },
+        orderBy: { createdAt: "desc" },
+        take: 50,
+        select: { solved: true },
+      }),
+      prisma.puzzleAttempt.findFirst({
+        where: { userId: viewer.id },
+        orderBy: { createdAt: "desc" },
+        select: { ratingBefore: true, ratingAfter: true },
+      }),
+    ]);
+
+    let streak = 0;
+    for (const attempt of recent) {
+      if (!attempt.solved) break;
+      streak += 1;
+    }
+
+    const lastDelta =
+      last && last.ratingBefore != null && last.ratingAfter != null
+        ? last.ratingAfter - last.ratingBefore
+        : 0;
+
+    return {
+      attempted,
+      solved,
+      streak,
+      accuracy: attempted > 0 ? Math.round((solved / attempted) * 100) : 0,
+      rating: ratingRow?.rating ?? START_RATING,
+      peak: ratingRow?.peak ?? START_RATING,
+      lastDelta,
+    };
+  }
+
+  // Signed-out visitors still share the local profile; their attempts never
+  // write into an account's rating.
   const profile = await ensureProfile();
 
   const [attempted, solved, recent, last] = await Promise.all([
-    prisma.puzzleAttempt.count(),
-    prisma.puzzleAttempt.count({ where: { solved: true } }),
+    prisma.puzzleAttempt.count({
+      where: { userId: null },
+    }),
+    prisma.puzzleAttempt.count({ where: { userId: null, solved: true } }),
     prisma.puzzleAttempt.findMany({
+      where: { userId: null },
       orderBy: { createdAt: "desc" },
       take: 50,
       select: { solved: true },
     }),
     prisma.puzzleAttempt.findFirst({
+      where: { userId: null },
       orderBy: { createdAt: "desc" },
       select: { ratingBefore: true, ratingAfter: true },
     }),
   ]);
 
-  // Current streak = consecutive solved attempts from the most recent one back.
   let streak = 0;
   for (const attempt of recent) {
     if (!attempt.solved) break;
@@ -813,10 +867,15 @@ export async function getPracticePuzzle(
     source: true,
   } as const;
 
-  const profile = await ensureProfile();
-  const rating = profile.puzzleRating;
+  const viewer = await getViewer();
+  const profile = viewer ? null : await ensureProfile();
+  const rating =
+    viewer
+      ? (await getPlayerRating(viewer.id, "puzzle"))?.rating ?? START_RATING
+      : profile?.puzzleRating ?? START_RATING;
 
   const recent = await prisma.puzzleAttempt.findMany({
+    where: viewer ? { userId: viewer.id } : { userId: null },
     orderBy: { createdAt: "desc" },
     take: 24,
     select: { puzzleId: true },
@@ -872,16 +931,32 @@ export async function getPracticePuzzle(
 export async function submitPuzzleAttempt(input: {
   puzzleId: string;
   solved: boolean;
+  /** Practice mode: validate the attempt, but never touch rating or history. */
+  rated?: boolean;
 }): Promise<PuzzleStats> {
+  if (input.rated === false) return puzzleStats();
+
   const puzzle = await prisma.puzzle.findUnique({
     where: { id: input.puzzleId },
     select: { rating: true },
   });
   if (!puzzle) throw new Error("Unknown puzzle");
 
-  const profile = await ensureProfile();
-  const attempts = await prisma.puzzleAttempt.count();
+  const viewer = await getViewer();
   const solved = Boolean(input.solved);
+
+  if (viewer) {
+    await recordPuzzleAttemptForUser({
+      userId: viewer.id,
+      puzzleId: input.puzzleId,
+      puzzleRating: puzzle.rating,
+      solved,
+    });
+    return puzzleStats();
+  }
+
+  const profile = await ensureProfile();
+  const attempts = await prisma.puzzleAttempt.count({ where: { userId: null } });
 
   // One puzzle = one match. Rating gap sets the expectancy.
   const update = updateRating({
@@ -1238,6 +1313,9 @@ export type SaveGameInput = {
  * PGN here would let a malformed game into the record.
  */
 export async function saveEngineGame(input: SaveGameInput): Promise<{ id: string }> {
+  const viewer = await getViewer();
+  const now = new Date();
+
   // Replay from the position the game actually began in. Replaying a game that
   // started from a custom FEN against the standard start position rejects the
   // first black move as illegal and silently stores a truncated game.
@@ -1286,6 +1364,7 @@ export async function saveEngineGame(input: SaveGameInput): Promise<{ id: string
 
   const data = {
     kind: "engine",
+    userId: viewer?.id ?? null,
     playerColor: input.playerColor,
     botId: input.botId ?? null,
     level: Math.max(1, Math.min(8, Math.round(input.level))),
@@ -1297,6 +1376,7 @@ export async function saveEngineGame(input: SaveGameInput): Promise<{ id: string
     pgn: game.pgn({ maxWidth: 80, newline: "\n" }),
     fen: input.fen,
     plies,
+    createdAt: now,
   };
 
   // A finished game is the one thing in this app that must never be lost, so
@@ -1315,8 +1395,27 @@ export async function saveEngineGame(input: SaveGameInput): Promise<{ id: string
     }
   }
 
+  if (viewer) {
+    try {
+      await recordEngineGameRating({
+        userId: viewer.id,
+        game: {
+          result: data.result,
+          timeControl: data.timeControl,
+          level: data.level,
+          botId: data.botId,
+          createdAt: now,
+        },
+      });
+      revalidatePath(`/player/${viewer.handle}`);
+    } catch {
+      // A rating write must never cost the finished game.
+    }
+  }
+
   revalidatePath("/games");
   revalidatePath("/");
+  revalidatePath("/players");
   return { id: row.id };
 }
 
@@ -1333,9 +1432,15 @@ export async function importGame(input: {
   as: "white" | "black";
 }): Promise<{ id: string }> {
   if (!input.pgn.trim()) throw new Error("Paste a PGN first.");
-  const row = await storeImportedGame({ pgn: input.pgn, as: input.as });
+  const viewer = await getViewer();
+  const row = await storeImportedGame({
+    pgn: input.pgn,
+    as: input.as,
+    userId: viewer?.id ?? null,
+  });
   revalidatePath("/games");
   revalidatePath("/");
+  if (viewer) revalidatePath(`/player/${viewer.handle}`);
   return { id: row.id };
 }
 

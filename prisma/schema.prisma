@@ -103,44 +103,52 @@ model Puzzle {
 model PuzzleAttempt {
   id           String   @id @default(cuid())
   puzzleId     String
+  /// Which account solved it. Legacy rows are claimed by the oldest account.
+  userId       String?
   solved       Boolean
   // Elo snapshot, so history can be replayed and a rating graph drawn later.
   ratingBefore Int?
   ratingAfter  Int?
   createdAt    DateTime @default(now())
   puzzle       Puzzle   @relation(fields: [puzzleId], references: [id], onDelete: Cascade)
+  user         User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
 
   @@index([createdAt])
+  @@index([userId, createdAt])
 }
 
 /// One finished game against the engine. The PGN is the record; everything
 /// else is denormalised so the history list never has to replay it.
 model Game {
-  id          String   @id @default(cuid())
-  kind        String   @default("engine") // "engine" for now
-  playerColor String // "white" | "black" — the side you had
-  result      String // "win" | "loss" | "draw", from your point of view
-  resultText  String   @default("") // "You won by checkmate"
-  skill       Int      @default(12) // engine Skill Level, i.e. opponent strength
-  level       Int      @default(4) // the named level you picked (1–8)
-  botId       String? // which character you played, when it was one
-  timeControl String   @default("unlimited") // "5+3", or "unlimited"
-  startFen    String   @default("") // non-standard start position, else empty
-  pgn         String
-  fen         String // final position, so the board can be restored without replay
-  plies       Int      @default(0)
+  id               String    @id @default(cuid())
+  kind             String    @default("engine") // "engine" for now
+  /// Which account played it. Null only for games saved before accounts owned them.
+  userId           String?
+  playerColor      String // "white" | "black" — the side you had
+  result           String // "win" | "loss" | "draw", from your point of view
+  resultText       String    @default("") // "You won by checkmate"
+  skill            Int       @default(12) // engine Skill Level, i.e. opponent strength
+  level            Int       @default(4) // the named level you picked (1–8)
+  botId            String? // which character you played, when it was one
+  timeControl      String    @default("unlimited") // "5+3", or "unlimited"
+  startFen         String    @default("") // non-standard start position, else empty
+  pgn              String
+  fen              String // final position, so the board can be restored without replay
+  plies            Int       @default(0)
   /// JSON written by the review pass: accuracy + centipawn loss per colour.
-  analysis    String?
+  analysis         String?
   /// Stable id from Lichess/chess.com, so importing a history twice is safe.
-  externalId  String?  @unique
-  externalUrl String?
+  externalId       String?   @unique
+  externalUrl      String?
   /// When the review's blunders were extracted into drill cards. Zero cards
   /// is a valid result, so this is what stops re-parsing the same game forever.
   mistakesSyncedAt DateTime?
-  createdAt   DateTime @default(now())
-  mistakes    Mistake[]
+  createdAt        DateTime  @default(now())
+  mistakes         Mistake[]
+  user             User?     @relation(fields: [userId], references: [id], onDelete: SetNull)
 
   @@index([createdAt])
+  @@index([userId, createdAt])
 }
 
 /// A losing move taken out of a reviewed game and turned into a drill card.
@@ -183,29 +191,29 @@ model Profile {
 /// A challenge between two accounts: public (appears in the lobby) or private
 /// (a link you send a friend). Clocks are server-side and resume across reloads.
 model Duel {
-  id          String    @id @default(cuid())
-  code        String    @unique
-  visibility  String    @default("public") // "public" | "private"
+  id           String      @id @default(cuid())
+  code         String      @unique
+  visibility   String      @default("public") // "public" | "private"
   tournamentId String?
   tournament   Tournament? @relation(fields: [tournamentId], references: [id], onDelete: SetNull)
-  status      String    @default("open") // open | playing | finished | cancelled
-  hostId      String
-  host        User      @relation("DuelHost", fields: [hostId], references: [id], onDelete: Cascade)
-  hostColor   String    // "white" | "black"
-  guestId     String?
-  guest       User?     @relation("DuelGuest", fields: [guestId], references: [id], onDelete: SetNull)
-  timeControl String    // "1+0", "5+3", "correspondence"
-  clocked     Boolean   @default(true)
-  whiteMs     Int       @default(0)
-  blackMs     Int       @default(0)
-  turn        String    @default("w")
-  pgn         String    @default("")
-  fen         String
-  lastMoveAt  DateTime?
-  winner      String?   // "white" | "black" | "draw"
-  resultText  String    @default("")
-  createdAt   DateTime  @default(now())
-  updatedAt   DateTime  @updatedAt
+  status       String      @default("open") // open | playing | finished | cancelled
+  hostId       String
+  host         User        @relation("DuelHost", fields: [hostId], references: [id], onDelete: Cascade)
+  hostColor    String // "white" | "black"
+  guestId      String?
+  guest        User?       @relation("DuelGuest", fields: [guestId], references: [id], onDelete: SetNull)
+  timeControl  String // "1+0", "5+3", "correspondence"
+  clocked      Boolean     @default(true)
+  whiteMs      Int         @default(0)
+  blackMs      Int         @default(0)
+  turn         String      @default("w")
+  pgn          String      @default("")
+  fen          String
+  lastMoveAt   DateTime?
+  winner       String? // "white" | "black" | "draw"
+  resultText   String      @default("")
+  createdAt    DateTime    @default(now())
+  updatedAt    DateTime    @updatedAt
 
   @@index([status, visibility, createdAt])
   @@index([tournamentId])
@@ -213,22 +221,22 @@ model Duel {
 }
 
 model Study {
-  id        String    @id @default(cuid())
-  title     String
-  subtitle  String    @default("")
-  pgn       String
-  eco       String    @default("")
+  id         String    @id @default(cuid())
+  title      String
+  subtitle   String    @default("")
+  pgn        String
+  eco        String    @default("")
   /// Who published it: "Community" (seeded), "Lichess" (imported), or a handle.
-  author    String    @default("Community")
+  author     String    @default("Community")
   /// "local" (a game you published), "seed", or "lichess".
-  source    String    @default("local")
-  sourceUrl String    @default("")
+  source     String    @default("local")
+  sourceUrl  String    @default("")
   /// Lichess game id, so the daily import never inserts the same game twice.
-  externalId String?  @unique
-  userId    String?
-  user      User?     @relation(fields: [userId], references: [id], onDelete: SetNull)
-  createdAt DateTime  @default(now())
-  comments  Comment[]
+  externalId String?   @unique
+  userId     String?
+  user       User?     @relation(fields: [userId], references: [id], onDelete: SetNull)
+  createdAt  DateTime  @default(now())
+  comments   Comment[]
 }
 
 model Comment {
@@ -266,21 +274,58 @@ model Review {
 /// A real account. The community is readable without one, but publishing a
 /// study and writing a note both require signing in.
 model User {
-  id           String    @id @default(cuid())
-  email        String    @unique
+  id             String          @id @default(cuid())
+  email          String          @unique
   /// Lowercase, unique, shown next to every study and note this user writes.
-  handle       String    @unique
-  passwordHash String
+  handle         String          @unique
+  passwordHash   String
   /// Set by clicking the link in the verification email. Unverified accounts
   /// can read everything but cannot publish or write notes.
-  emailVerified Boolean  @default(false)
-  createdAt    DateTime  @default(now())
-  studies      Study[]
-  comments     Comment[]
-  sessions     Session[]
-  emailTokens  EmailToken[]
-  hostedDuels  Duel[]     @relation("DuelHost")
-  joinedDuels  Duel[]     @relation("DuelGuest")
+  emailVerified  Boolean         @default(false)
+  createdAt      DateTime        @default(now())
+  studies        Study[]
+  comments       Comment[]
+  sessions       Session[]
+  emailTokens    EmailToken[]
+  hostedDuels    Duel[]          @relation("DuelHost")
+  joinedDuels    Duel[]          @relation("DuelGuest")
+  ratings        PlayerRating[]
+  ratingPoints   RatingPoint[]
+  games          Game[]
+  puzzleAttempts PuzzleAttempt[]
+}
+
+/// One rating per account per time-control family. Puzzle is the same table,
+/// so the public profile can draw every rating with one query.
+model PlayerRating {
+  id        String   @id @default(cuid())
+  userId    String
+  category  String // bullet | blitz | rapid | classical | correspondence | puzzle
+  rating    Int      @default(1500)
+  peak      Int      @default(1500)
+  games     Int      @default(0)
+  wins      Int      @default(0)
+  draws     Int      @default(0)
+  losses    Int      @default(0)
+  updatedAt DateTime @updatedAt
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, category])
+  @@index([category, rating])
+}
+
+/// Every finished rated game or puzzle appends one row. The profile graph
+/// aggregates these by day; keeping raw points means generous time ranges
+/// never need a second data source.
+model RatingPoint {
+  id        String   @id @default(cuid())
+  userId    String
+  category  String
+  rating    Int
+  createdAt DateTime @default(now())
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, category, createdAt])
 }
 
 model Session {
@@ -316,7 +361,6 @@ model RateLimit {
   @@index([windowStart])
 }
 
-
 model Donation {
   id          String   @id @default(cuid())
   name        String   @default("Anonymous")
@@ -339,21 +383,21 @@ model SwagOrder {
 }
 
 model Tournament {
-  id          String   @id @default(cuid())
+  id          String            @id @default(cuid())
   name        String
   startsAt    DateTime
   endsAt      DateTime
-  timeControl String   @default("3+2")
-  source      String   @default("local") // local | lichess | chess.com
+  timeControl String            @default("3+2")
+  source      String            @default("local") // local | lichess | chess.com
   externalId  String?
   externalUrl String?
-  players     Int      @default(0)
-  createdAt   DateTime @default(now())
+  players     Int               @default(0)
+  createdAt   DateTime          @default(now())
   entries     TournamentEntry[]
   duels       Duel[]
 
-  @@index([endsAt])
   @@unique([source, externalId])
+  @@index([endsAt])
 }
 
 model TournamentEntry {
