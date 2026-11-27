@@ -19,6 +19,7 @@ import {
   addMove,
   deleteSubtree,
   describePosition,
+  exportRepertoirePgn,
   importPgn,
   saveComment,
   setMainLine,
@@ -43,25 +44,34 @@ export default function RepertoireBuilder({
   side,
   initialNodes,
   openingIndex,
+  initialNodeId,
 }: {
   repertoireId: string;
   name: string;
   side: "white" | "black";
   initialNodes: NodeDTO[];
   openingIndex: Record<string, { eco: string; name: string; ply: number }>;
+  /** Open here instead of the root — used after "build from this line". */
+  initialNodeId?: string;
 }) {
   // The move tree lives in React state, seeded from the server. Each mutation is
   // applied locally first (optimistic UI) and then persisted by a server action.
   const [nodes, setNodes] = useState<NodeDTO[]>(initialNodes);
 
   const root = nodes.find((n) => n.ply === 0) ?? initialNodes[0];
-  const [currentId, setCurrentId] = useState<string>(root?.id ?? "");
+  const [currentId, setCurrentId] = useState<string>(() => {
+    if (initialNodeId && initialNodes.some((n) => n.id === initialNodeId)) {
+      return initialNodeId;
+    }
+    return root?.id ?? "";
+  });
   const [selected, setSelected] = useState<string | null>(null);
   const [promo, setPromo] = useState<{ from: string; to: string } | null>(null);
   const [pending, setPending] = useState<Pending | null>(null);
   const [orientation, setOrientation] = useState<"white" | "black">(side);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [exporting, setExporting] = useState(false);
   const [soundOn, setSoundOn] = useState(true);
   const [description, setDescription] = useState<PositionDescription>({
     opening: null,
@@ -239,6 +249,34 @@ export default function RepertoireBuilder({
     setPending(null);
     setPromo(null);
     setConfirmDelete(false);
+  }
+
+  /**
+   * Download the stored tree as PGN. The server builds it (so the export
+   * matches the database, not the optimistic local tree), then the browser
+   * saves it as a normal file download.
+   */
+  async function handleExportPgn() {
+    if (exporting) return;
+    setExporting(true);
+    try {
+      const pgn = await exportRepertoirePgn(repertoireId);
+      const blob = new Blob([pgn], { type: "application/x-chess-pgn;charset=utf-8" });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = `${
+        name.replace(/[^\w.-]+/g, "-").replace(/^-+|-+$/g, "") || "repertoire"
+      }.pgn`;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(url);
+    } catch (error) {
+      console.error("PGN export failed", error);
+    } finally {
+      setExporting(false);
+    }
   }
 
   /**
@@ -432,6 +470,14 @@ export default function RepertoireBuilder({
               className="rounded-lg border border-[var(--line)] px-2.5 py-1.5 text-xs transition hover:border-[var(--accent)]"
             >
               Flip board
+            </button>
+            <button
+              onClick={handleExportPgn}
+              disabled={exporting}
+              className="rounded-lg border border-[var(--line)] px-2.5 py-1.5 text-xs transition hover:border-[var(--accent)] disabled:cursor-not-allowed disabled:opacity-50"
+              title="Download this repertoire as PGN, with nested variations"
+            >
+              {exporting ? "Exporting…" : "Export PGN"}
             </button>
           </div>
         </div>

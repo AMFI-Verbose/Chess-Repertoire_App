@@ -2,10 +2,15 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { Chessboard } from "react-chessboard";
 import { Chess } from "chess.js";
 
-import { searchOpenings, type OpeningSummary } from "@/app/actions";
+import {
+  createRepertoireFromOpening,
+  searchOpenings,
+  type OpeningSummary,
+} from "@/app/actions";
 import { DARK_SQUARE, LIGHT_SQUARE } from "@/lib/boardTheme";
 
 const VOLUMES = ["A", "B", "C", "D", "E"] as const;
@@ -132,10 +137,12 @@ export default function OpeningsExplorer({
   );
   const [loading, setLoading] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [building, setBuilding] = useState(false);
   const [step, setStep] = useState(0);
   const [playing, setPlaying] = useState(false);
   const [flipped, setFlipped] = useState(false);
 
+  const router = useRouter();
   const tokenRef = useRef(0);
   const autoplay = useRef(false);
 
@@ -240,6 +247,24 @@ export default function OpeningsExplorer({
     await navigator.clipboard.writeText(`${selected.eco} ${selected.name}\n${pgn}`);
     setCopied(true);
     setTimeout(() => setCopied(false), 1500);
+  }
+
+  /**
+   * Turn the previewed line into a real repertoire: the server replays the UCI
+   * moves, stores them as the main line, and the builder opens on it.
+   */
+  async function buildRepertoireFromLine() {
+    if (!selected || building) return;
+    setBuilding(true);
+    try {
+      const { repertoireId, lastNodeId } = await createRepertoireFromOpening({
+        movesUci: selected.movesUci,
+      });
+      router.push(`/r/${repertoireId}?node=${lastNodeId}`);
+    } catch (error) {
+      console.error("Could not build a repertoire from this line", error);
+      setBuilding(false);
+    }
   }
 
   /** Picking a line always restarts it: clicking the active row replays it. */
@@ -512,12 +537,15 @@ export default function OpeningsExplorer({
                   >
                     {copied ? "Copied ✓" : "Copy PGN"}
                   </button>
-                  <Link
-                    href="/"
-                    className="text-[11px] text-[var(--muted)] transition-colors hover:text-[var(--text)]"
+                  <button
+                    onClick={buildRepertoireFromLine}
+                    disabled={building}
+                    className="text-[11px] text-[var(--muted)] transition-colors hover:text-[var(--text)] disabled:cursor-wait disabled:opacity-60"
                   >
-                    Build a repertoire from it →
-                  </Link>
+                    {building
+                      ? "Creating repertoire…"
+                      : "Build a repertoire from it →"}
+                  </button>
                 </div>
               </div>
             </>

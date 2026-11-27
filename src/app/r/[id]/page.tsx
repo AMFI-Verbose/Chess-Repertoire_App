@@ -8,11 +8,14 @@ export const dynamic = "force-dynamic";
 
 export default async function RepertoirePage({
   params,
+  searchParams,
 }: {
   // In Next.js 15 route params are async — you must await them.
   params: Promise<{ id: string }>;
+  searchParams: Promise<{ node?: string }>;
 }) {
   const { id } = await params;
+  const { node } = await searchParams;
 
   // The full ECO table is ~3,900 rows, so it stays on the server. The client
   // asks for a single position description per navigation instead.
@@ -56,6 +59,11 @@ export default async function RepertoirePage({
     }
   }
 
+  // "Build a repertoire from this line" lands on the end of the line, not on
+  // the empty starting position. Ignore a node id that is not in this tree.
+  const initialNodeId =
+    node && initialNodes.some((item) => item.id === node) ? node : undefined;
+
   return (
     <RepertoireBuilder
       repertoireId={repertoire.id}
@@ -63,6 +71,7 @@ export default async function RepertoirePage({
       side={repertoire.side === "black" ? "black" : "white"}
       initialNodes={initialNodes}
       openingIndex={openingIndex}
+      initialNodeId={initialNodeId}
     />
   );
 }

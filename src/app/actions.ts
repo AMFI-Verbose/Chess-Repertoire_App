@@ -22,6 +22,7 @@ import { START_RATING, updateRating } from "@/lib/elo";
 import { getViewer } from "@/lib/auth";
 import { rateLimit } from "@/lib/rate-limit";
 import { storeImportedGame } from "@/lib/imported-games";
+import { buildRepertoirePgn } from "@/lib/pgn";
 import { syncMistakesFromAnalysis } from "@/lib/mistakes";
 import {
   ensurePlayerRatings,
@@ -72,6 +73,7 @@ export async function createRepertoire(formData: FormData) {
           san: "",
           uci: "",
           fen: START_FEN,
+          normFen: normalizedFen(START_FEN),
           ply: 0,
           isMain: true,
         },
@@ -81,6 +83,82 @@ export async function createRepertoire(formData: FormData) {
 
   revalidatePath("/");
   redirect(`/r/${repertoire.id}`);
+}
+
+/**
+ * Create a repertoire straight from an ECO line in the opening library.
+ *
+ * The library only knows the line as UCI text, so replay it with chess.js to
+ * get the SAN and FEN of every position, then store the path as the main line.
+ * The side is the colour that played the last move: that is the repertoire the
+ * line describes ("this is what I play"), not the side left to move.
+ */
+export async function createRepertoireFromOpening(input: {
+  movesUci: string;
+}): Promise<{ repertoireId: string; lastNodeId: string }> {
+  const movesUci = input.movesUci.trim();
+  if (!movesUci) throw new Error("Empty opening line");
+
+  const opening = await prisma.opening.findFirst({ where: { movesUci } });
+  if (!opening) throw new Error("Unknown opening line");
+
+  const game = new Chess();
+  const moves: { san: string; uci: string; fen: string; ply: number }[] = [];
+
+  for (const token of movesUci.split(" ")) {
+    if (!token) continue;
+    const move = game.move({
+      from: token.slice(0, 2),
+      to: token.slice(2, 4),
+      promotion: token.length > 4 ? token[4] : "q",
+    });
+    moves.push({
+      san: move.san,
+      uci: `${move.from}${move.to}${move.promotion ?? ""}`,
+      fen: game.fen(),
+      ply: moves.length + 1,
+    });
+  }
+
+  const repertoire = await prisma.repertoire.create({
+    data: {
+      name: opening.name.slice(0, 80),
+      side: moves.length % 2 === 1 ? "white" : "black",
+      nodes: {
+        create: {
+          san: "",
+          uci: "",
+          fen: START_FEN,
+          normFen: normalizedFen(START_FEN),
+          ply: 0,
+          isMain: true,
+        },
+      },
+    },
+    include: { nodes: true },
+  });
+
+  let parentId = repertoire.nodes[0]?.id;
+  if (!parentId) throw new Error("Repertoire root missing");
+
+  for (const move of moves) {
+    const node = await prisma.node.create({
+      data: {
+        repertoireId: repertoire.id,
+        parentId,
+        san: move.san,
+        uci: move.uci,
+        fen: move.fen,
+        normFen: normalizedFen(move.fen),
+        ply: move.ply,
+        isMain: true,
+      },
+    });
+    parentId = node.id;
+  }
+
+  revalidatePath("/");
+  return { repertoireId: repertoire.id, lastNodeId: parentId };
 }
 
 /**
@@ -165,6 +243,38 @@ export async function saveComment(nodeId: string, comment: string): Promise<void
   });
 
   revalidatePath(`/r/${node.repertoireId}`);
+}
+
+/**
+ * Export one repertoire as a PGN with nested variations.
+ *
+ * Built from the database rather than the client's optimistic tree: an export
+ * should reflect what is actually stored, even if a local edit is still in
+ * flight. The main line comes from `isMain`, every other child becomes a
+ * parenthesised alternative.
+ */
+export async function exportRepertoirePgn(repertoireId: string): Promise<string> {
+  const repertoire = await prisma.repertoire.findUnique({
+    where: { id: repertoireId },
+    include: { nodes: true },
+  });
+  if (!repertoire) throw new Error("Repertoire not found");
+
+  const root = repertoire.nodes.find((node) => node.ply === 0);
+  return buildRepertoirePgn({
+    name: repertoire.name,
+    side: repertoire.side === "black" ? "black" : "white",
+    rootFen: root?.fen ?? START_FEN,
+    nodes: repertoire.nodes.map((node) => ({
+      id: node.id,
+      parentId: node.parentId,
+      san: node.san,
+      fen: node.fen,
+      ply: node.ply,
+      comment: node.comment,
+      isMain: node.isMain,
+    })),
+  });
 }
 
 /**
